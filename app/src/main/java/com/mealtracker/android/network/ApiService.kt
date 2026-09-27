@@ -218,6 +218,17 @@ interface ApiService {
     @POST("profile/calculate-kcal-goal")
     suspend fun calculateKcalGoal(): KcalGoalCalculationResult
 
+    // The web app's mirror of Health Connect's own weight readings -
+    // see backend WeightHistoryEntry's docstring. GET is read-only
+    // (used by the web app itself, not Android); PUT is a WHOLESALE
+    // replace, called by Android with its full current Health Connect
+    // read every sync.
+    @GET("profile/weight-history")
+    suspend fun getWeightHistory(): List<WeightHistoryEntry>
+
+    @PUT("profile/weight-history")
+    suspend fun replaceWeightHistory(@Body request: WeightHistoryReplaceRequest): List<WeightHistoryEntry>
+
     // Uploads an image, decodes a barcode from it (pyzbar + zxing-cpp
     // fallback, see backend). NEVER auto-creates an item -- caller must
     // show `barcode` to the user for confirmation before using it (see

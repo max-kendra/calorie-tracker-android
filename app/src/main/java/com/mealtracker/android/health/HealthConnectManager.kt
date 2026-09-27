@@ -13,6 +13,8 @@ import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Mass
 import com.mealtracker.android.network.ApiClient
+import com.mealtracker.android.network.models.WeightHistoryEntryInRequest
+import com.mealtracker.android.network.models.WeightHistoryReplaceRequest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -292,12 +294,74 @@ object HealthConnectManager {
      * upsert means re-pushing unchanged data just replaces the existing
      * record, not a duplicate.
      */
-    suspend fun syncToday(context: Context) {
-        if (!HealthConnectPreferences.isNutritionExportEnabled(context)) return
-        if (!isAvailable(context)) return
-        if (!hasNutritionPermission(context)) return
+    /**
+     * Pushes the CURRENT FULL Health Connect weight history to the
+     * backend as a wholesale replace (see backend WeightHistoryEntry's
+     * docstring for why this must always be a full replace, never an
+     * incremental add - it's what makes an edit or deletion made
+     * directly in Health Connect show up on the web too, with no
+     * reconciliation logic needed). Reuses the same 2000-01-01-to-now
+     * "effectively everything" range the Profile screen's own full-
+     * history load already uses (see ProfileOverviewViewModel).
+     *
+     * Assumes hasWeightPermissions() has already been confirmed true,
+     * same convention as readWeightHistory itself.
+     */
+    suspend fun syncWeightHistory(context: Context) {
+        val start = Instant.parse("2000-01-01T00:00:00Z")
+        val end = Instant.now()
+        val history = readWeightHistory(context, start, end)
+        ApiClient.service.replaceWeightHistory(
+            WeightHistoryReplaceRequest(
+                entries = history.map {
+                    WeightHistoryEntryInRequest(
+                        recordedAt = it.time.toString(),
+                        weightKg = it.kg
+                    )
+                }
+            )
+        )
+    }
 
-        val today = LocalDate.now()
-        syncLogsInRange(context, today, today)
+    /**
+     * Opportunistic app-startup sync: pushes only today's meals, and
+     * only if export is already fully set up. Silently no-ops otherwise
+     * (e.g. export disabled, permission not granted, Health Connect not
+     * installed) rather than surfacing anything at startup - the
+     * Settings backfill button remains the deliberate, visible fallback
+     * for anyone who needs to recover from a gap. Safe to call on every
+     * cold start: writeMealNutrition's clientRecordId/clientRecordVersion
+     * upsert means re-pushing unchanged data just replaces the existing
+     * record, not a duplicate.
+     *
+     * Also opportunistically syncs weight history the same way, gated
+     * on isWeightImportEnabled (see design discussion) rather than a
+     * new preference - weight IMPORT already has its own explicit
+     * on/off toggle, separate from Health Connect permission itself,
+     * and pushing our own already-permitted read up to our own backend
+     * is a natural extension of that same "weight import is on"
+     * decision, not a separate one needing its own toggle. Each half
+     * (nutrition, weight) fails independently - a Health Connect hiccup
+     * on one shouldn't block the other.
+     */
+    suspend fun syncToday(context: Context) {
+        if (HealthConnectPreferences.isNutritionExportEnabled(context) && isAvailable(context) && hasNutritionPermission(context)) {
+            try {
+                val today = LocalDate.now()
+                syncLogsInRange(context, today, today)
+            } catch (e: Exception) {
+                // Best-effort, same as this whole function's own
+                // "silently no-op" philosophy - and specifically must
+                // not prevent the weight sync below from running.
+            }
+        }
+
+        if (HealthConnectPreferences.isWeightImportEnabled(context) && isAvailable(context) && hasWeightPermissions(context)) {
+            try {
+                syncWeightHistory(context)
+            } catch (e: Exception) {
+                // Same reasoning as above, reversed.
+            }
+        }
     }
 }

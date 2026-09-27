@@ -688,3 +688,33 @@ data class PhysiologicalGuideline(
     val unit: String,
     val basis: String? = null
 )
+/**
+ * Mirrors WeightHistoryEntryOut from app/schemas.py - the web app's
+ * read side of the Health Connect weight mirror (see backend
+ * WeightHistoryEntry's own docstring). recordedAt is an ISO instant
+ * string, matching how Instant serializes elsewhere in this app.
+ */
+@Serializable
+data class WeightHistoryEntry(
+    @SerialName("recorded_at") val recordedAt: String,
+    @SerialName("weight_kg") val weightKg: String
+)
+
+/**
+ * Request body for PUT /profile/weight-history - a WHOLESALE replace,
+ * not an incremental add (see backend WeightHistoryEntry's docstring
+ * for why: this is what makes an edit or deletion made directly in
+ * Health Connect show up on the web too, with no reconciliation logic
+ * needed). Always send the FULL current Health Connect read here, not
+ * just new readings since last sync.
+ */
+@Serializable
+data class WeightHistoryEntryInRequest(
+    @SerialName("recorded_at") val recordedAt: String,
+    @SerialName("weight_kg") val weightKg: Double
+)
+
+@Serializable
+data class WeightHistoryReplaceRequest(
+    val entries: List<WeightHistoryEntryInRequest>
+)

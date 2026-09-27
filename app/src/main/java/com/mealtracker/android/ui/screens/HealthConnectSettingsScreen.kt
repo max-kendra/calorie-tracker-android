@@ -60,6 +60,9 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
     var isBackfilling by remember { mutableStateOf(false) }
     var backfillProgress by remember { mutableStateOf<String?>(null) }
     var backfillError by remember { mutableStateOf<String?>(null) }
+    var isSyncingWeight by remember { mutableStateOf(false) }
+    var weightSyncMessage by remember { mutableStateOf<String?>(null) }
+    var weightSyncError by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshPermissionState() {
         healthConnectAvailable = HealthConnectManager.isAvailable(context)
@@ -124,6 +127,57 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
                     }
                 }
             )
+
+            // The opportunistic sync only runs on app cold start (see
+            // HealthConnectManager.syncToday) - this pushes the SAME
+            // full-history read on demand, for whenever you don't want
+            // to wait for the next cold start (e.g. right after editing
+            // a reading in Libra and wanting the web chart to reflect
+            // it immediately). Always a full replace either way, never
+            // additive - see backend WeightHistoryEntry's docstring.
+            if (weightImportEnabled && hasWeightPermission) {
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Syncs automatically each time you open the app. Use this to push right now instead.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                if (isSyncingWeight) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                        Text("Syncing weight history...", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else {
+                    androidx.compose.material3.TextButton(onClick = {
+                        coroutineScope.launch {
+                            isSyncingWeight = true
+                            weightSyncMessage = null
+                            weightSyncError = null
+                            try {
+                                HealthConnectManager.syncWeightHistory(context)
+                                weightSyncMessage = "Weight history synced."
+                            } catch (e: Exception) {
+                                weightSyncError = e.message ?: "Couldn't sync weight history"
+                            } finally {
+                                isSyncingWeight = false
+                            }
+                        }
+                    }) {
+                        Text("Sync now")
+                    }
+                }
+                if (weightSyncMessage != null) {
+                    Text(weightSyncMessage!!, style = MaterialTheme.typography.bodySmall)
+                }
+                if (weightSyncError != null) {
+                    Text(
+                        weightSyncError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
             HorizontalDivider()
 
             HealthConnectToggleRow(
