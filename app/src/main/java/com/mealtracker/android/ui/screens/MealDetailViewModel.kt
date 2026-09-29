@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.ExtendedNutritionTotals
+import com.mealtracker.android.network.models.CreateGroceryEntryRequest
+import com.mealtracker.android.network.models.GroceryStore
+import com.mealtracker.android.network.models.GroceryStoreCreateRequest
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemMacrosUpdateRequest
 import com.mealtracker.android.network.models.Log
@@ -396,6 +399,21 @@ data class MealDetailUiState(
     // Edit (pencil) button on the item info page - name + macros only.
     // Nested under itemToLog same as the serving-creation state above.
     val showEditItemDialog: Boolean = false,
+    // "+ Add to grocery list" quick action, also on the item info page
+    // (see design discussion) - fire-and-forget, no dialog of its own,
+    // just a brief inline confirmation/error.
+    val isAddingToGroceryList: Boolean = false,
+    val addedToGroceryList: Boolean = false,
+    val addToGroceryListError: String? = null,
+    // Grocery-store checklist within the edit dialog (see design
+    // discussion) - editItemGroceryStores is the full available list
+    // (fetched once per dialog open), editItemSelectedStoreIds starts
+    // pre-filled from the item's OWN current stores.
+    val editItemGroceryStores: List<GroceryStore> = emptyList(),
+    val editItemSelectedStoreIds: Set<Int> = emptySet(),
+    val editItemNewStoreNameInput: String = "",
+    val editItemIsCreatingStore: Boolean = false,
+    val editItemGroceryStoresError: String? = null,
     val editItemName: String = "",
     val editItemKcal: String = "",
     val editItemProtein: String = "",
@@ -1632,12 +1650,79 @@ class MealDetailViewModel : ViewModel() {
             editItemSaltG = item.sodiumMg100g?.toDoubleOrNull()
                 ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: "",
             editItemCountsAsAddedSugar = item.countsAsAddedSugar ?: false,
+            editItemSelectedStoreIds = item.groceryStores.map { it.id }.toSet(),
+            editItemGroceryStoresError = null,
             editItemError = null
         )
+        loadEditItemGroceryStores()
+    }
+
+    private fun loadEditItemGroceryStores() {
+        viewModelScope.launch {
+            try {
+                val stores = ApiClient.service.getGroceryStores()
+                _uiState.value = _uiState.value.copy(editItemGroceryStores = stores)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(editItemGroceryStoresError = e.message ?: "Couldn't load grocery stores")
+            }
+        }
+    }
+
+    fun toggleEditItemGroceryStore(storeId: Int) {
+        val current = _uiState.value.editItemSelectedStoreIds
+        val updated = if (current.contains(storeId)) current - storeId else current + storeId
+        _uiState.value = _uiState.value.copy(editItemSelectedStoreIds = updated)
+    }
+
+    fun updateEditItemNewStoreName(value: String) {
+        _uiState.value = _uiState.value.copy(editItemNewStoreNameInput = value)
+    }
+
+    fun createEditItemGroceryStore() {
+        val name = _uiState.value.editItemNewStoreNameInput.trim()
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(editItemIsCreatingStore = true, editItemGroceryStoresError = null)
+            try {
+                val store = ApiClient.service.createGroceryStore(GroceryStoreCreateRequest(name = name))
+                val current = _uiState.value
+                _uiState.value = current.copy(
+                    editItemGroceryStores = current.editItemGroceryStores + store,
+                    editItemSelectedStoreIds = current.editItemSelectedStoreIds + store.id,
+                    editItemNewStoreNameInput = "",
+                    editItemIsCreatingStore = false
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    editItemIsCreatingStore = false,
+                    editItemGroceryStoresError = e.message ?: "Couldn't create store"
+                )
+            }
+        }
     }
 
     fun dismissEditItemDialog() {
         _uiState.value = _uiState.value.copy(showEditItemDialog = false, editItemError = null)
+    }
+
+    /** "+ Add to grocery list" quick action (see design discussion) -
+     * fire-and-forget, matching how this same action works on the web
+     * app: adds to the unassigned pool with no trip/quantity set yet,
+     * sorted out later from the Grocery List screen itself. */
+    fun addItemToGroceryList() {
+        val itemId = _uiState.value.itemToLog?.itemId ?: return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isAddingToGroceryList = true, addToGroceryListError = null, addedToGroceryList = false)
+            try {
+                ApiClient.service.addToGroceryList(CreateGroceryEntryRequest(itemId = itemId))
+                _uiState.value = _uiState.value.copy(isAddingToGroceryList = false, addedToGroceryList = true)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isAddingToGroceryList = false,
+                    addToGroceryListError = e.message ?: "Couldn't add to the grocery list"
+                )
+            }
+        }
     }
 
     fun updateEditItemName(value: String) { _uiState.value = _uiState.value.copy(editItemName = value) }
@@ -1686,7 +1771,8 @@ class MealDetailViewModel : ViewModel() {
                         // Salt (g) -> sodium (mg): same math as
                         // AddItemViewModel's saveItem().
                         sodiumMg100g = state.editItemSaltG.toDoubleOrNull()?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO),
-                        countsAsAddedSugar = state.editItemCountsAsAddedSugar
+                        countsAsAddedSugar = state.editItemCountsAsAddedSugar,
+                        groceryStoreIds = state.editItemSelectedStoreIds.toList()
                     )
                 )
                 val date = _uiState.value.date

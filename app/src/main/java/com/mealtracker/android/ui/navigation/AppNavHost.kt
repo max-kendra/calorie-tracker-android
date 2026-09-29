@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,7 +26,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -38,6 +41,7 @@ import com.mealtracker.android.ui.screens.CalorieGoalScreen
 import com.mealtracker.android.ui.screens.EditProfileScreen
 import com.mealtracker.android.ui.screens.HealthConnectSettingsScreen
 import com.mealtracker.android.ui.screens.HomeScreen
+import com.mealtracker.android.ui.screens.GroceryListScreen
 import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
 import com.mealtracker.android.ui.screens.MealCalorieGoalScreen
@@ -50,13 +54,15 @@ import com.mealtracker.android.ui.screens.SettingsScreen
 import com.mealtracker.android.ui.screens.WeightGoalScreen
 
 /**
- * The four bottom-nav destinations from the design doc: Home / Journal /
- * Meal Plan / Profile -- deliberately no Coach/Sprout equivalents (those
- * were Foodvisor-specific features, not part of our scope, see design doc).
+ * The five bottom-nav destinations: Home / Journal / Grocery List /
+ * Recipes / Profile - Grocery List added in the middle (see design
+ * discussion), deliberately no Coach/Sprout equivalents (those were
+ * Foodvisor-specific features, not part of our scope, see design doc).
  */
 sealed class Destination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Home : Destination("home", "Home", Icons.Filled.Home)
     object Journal : Destination("journal", "Journal", Icons.Filled.CalendarMonth)
+    object GroceryList : Destination("grocery_list", "Groceries", Icons.Filled.ShoppingCart)
     object Recipes : Destination("recipes", "Recipes", Icons.Filled.MenuBook)
     object Profile : Destination("profile", "Profile", Icons.Filled.Person)
 }
@@ -64,6 +70,7 @@ sealed class Destination(val route: String, val label: String, val icon: android
 private val bottomNavDestinations = listOf(
     Destination.Home,
     Destination.Journal,
+    Destination.GroceryList,
     Destination.Recipes,
     Destination.Profile
 )
@@ -107,7 +114,21 @@ fun AppNavHost(
 
                     bottomNavDestinations.forEach { destination ->
                         NavigationBarItem(
-                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            icon = {
+                                // ShoppingCart's glyph sits visually
+                                // higher than the other four icons'
+                                // more symmetric shapes within the same
+                                // bounding box (a cart's handle extends
+                                // up, its body extends down) - a small
+                                // manual nudge down, not a layout issue
+                                // shared code could fix.
+                                val iconOffset = if (destination == Destination.GroceryList) 2.dp else 0.dp
+                                Icon(
+                                    destination.icon,
+                                    contentDescription = destination.label,
+                                    modifier = Modifier.offset(y = iconOffset)
+                                )
+                            },
                             label = { Text(destination.label) },
                             selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
                             // Without this, the selected-tab indicator pill
@@ -205,6 +226,7 @@ fun AppNavHost(
             // the card"). It was only ever reachable from there, so
             // there's nothing else that needs this route.
             composable(Destination.Recipes.route) { RecipesScreen() }
+            composable(Destination.GroceryList.route) { GroceryListScreen() }
             composable(Destination.Profile.route) {
                 ProfileScreen(
                     onNavigateToSettings = { navController.navigate("profile_settings") }

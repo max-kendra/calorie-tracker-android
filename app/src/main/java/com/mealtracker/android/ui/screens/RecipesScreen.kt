@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -355,13 +357,6 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            Spacer(modifier = Modifier.padding(top = 8.dp))
-                            OutlinedTextField(
-                                value = state.editInstructions,
-                                onValueChange = { viewModel.updateEditInstructions(it) },
-                                label = { Text("Instructions (optional)") },
-                                modifier = Modifier.fillMaxWidth().height(180.dp)
-                            )
                             if (state.saveError != null) {
                                 Text(state.saveError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                             }
@@ -411,34 +406,139 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                     Text("View source", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
+                        }
 
-                            if (!recipe.instructions.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.padding(top = 20.dp))
-                                Text("Instructions", style = MaterialTheme.typography.titleSmall)
-                                Spacer(modifier = Modifier.padding(top = 4.dp))
-                                Text(recipe.instructions, style = MaterialTheme.typography.bodyMedium)
+                        // Ingredients + Steps - deliberately OUTSIDE the
+                        // if/else above, so both render in view AND edit
+                        // mode (see design discussion / bug report: this
+                        // used to be nested inside the view-only else
+                        // branch, which meant the isEditing checks inside
+                        // it could never actually be true when reached,
+                        // and switching to edit mode replaced this whole
+                        // section with just the name/servings/source
+                        // form instead of showing it alongside).
+                        Spacer(modifier = Modifier.padding(top = 20.dp))
+                        Text("Ingredients", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.padding(top = 4.dp))
+                        if (recipe.ingredients.isEmpty()) {
+                            Text("No ingredients listed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            recipe.ingredients.forEach { ingredient ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(ingredient.itemName, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "${ingredient.quantity.toDoubleOrNull()?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ingredient.quantity}" +
+                                            (ingredient.servingSizeName?.let { " $it" } ?: "g"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-
-                            Spacer(modifier = Modifier.padding(top = 20.dp))
-                            Text("Ingredients", style = MaterialTheme.typography.titleSmall)
-                            Spacer(modifier = Modifier.padding(top = 4.dp))
-                            if (recipe.ingredients.isEmpty()) {
-                                Text("No ingredients listed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            } else {
-                                recipe.ingredients.forEach { ingredient ->
-                                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(ingredient.itemName, style = MaterialTheme.typography.bodyMedium)
-                                        Text(
-                                            "${ingredient.quantity.toDoubleOrNull()?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ingredient.quantity}" +
-                                                (ingredient.servingSizeName?.let { " $it" } ?: "g"),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Spacer(modifier = Modifier.padding(top = 20.dp))
+                        Text("Steps", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.padding(top = 4.dp))
+                        if (recipe.steps.isEmpty() && !state.isEditing) {
+                            Text("No steps listed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        recipe.steps.forEach { step ->
+                            if (state.isEditing && state.editingStepId == step.id) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                                    OutlinedTextField(
+                                        value = state.editStepText,
+                                        onValueChange = { viewModel.updateEditStepText(it) },
+                                        label = { Text("Step ${step.stepNumber}") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.padding(top = 4.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        OutlinedTextField(
+                                            value = state.editStepTimerInput,
+                                            onValueChange = { viewModel.updateEditStepTimerInput(it) },
+                                            label = { Text("Timer (seconds, optional)") },
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            modifier = Modifier.weight(1f)
                                         )
+                                    }
+                                    Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = { viewModel.saveEditingStep() }, enabled = !state.isSavingStep) {
+                                            Text(if (state.isSavingStep) "Saving..." else "Save")
+                                        }
+                                        TextButton(onClick = { viewModel.cancelEditingStep() }) { Text("Cancel") }
+                                        TextButton(onClick = { viewModel.deleteStep(step.id) }) {
+                                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp)
+                                        .then(if (state.isEditing) Modifier.clickable { viewModel.startEditingStep(step.id) } else Modifier),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("${step.stepNumber}. ${step.text}", style = MaterialTheme.typography.bodyMedium)
+                                        if (step.timerSeconds != null) {
+                                            Text(
+                                                "${step.timerSeconds}s timer",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.padding(bottom = 20.dp))
                         }
+                        if (state.stepsError != null) {
+                            Text(state.stepsError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (state.isEditing) {
+                            // The "+" pane - one step at a time (see
+                            // design discussion), matching the web
+                            // app's own add-step form shape.
+                            Spacer(modifier = Modifier.padding(top = 8.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = state.newStepText,
+                                    onValueChange = { viewModel.updateNewStepText(it) },
+                                    label = { Text("Next step...") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.padding(top = 4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedTextField(
+                                        value = state.newStepTimerInput,
+                                        onValueChange = { viewModel.updateNewStepTimerInput(it) },
+                                        label = { Text("Timer (seconds, optional)") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.padding(start = 8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(MaterialTheme.colorScheme.primary)
+                                            .clickable(enabled = !state.isAddingStep && state.newStepText.isNotBlank()) { viewModel.addStep() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Filled.Add, contentDescription = "Add step", tint = MaterialTheme.colorScheme.onPrimary)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.padding(bottom = 20.dp))
                     }
                 }
             }

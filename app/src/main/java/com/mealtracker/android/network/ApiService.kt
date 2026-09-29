@@ -1,6 +1,7 @@
 package com.mealtracker.android.network
 
 import com.mealtracker.android.network.models.BarcodeScanResult
+import com.mealtracker.android.network.models.CreateGroceryEntryRequest
 import com.mealtracker.android.network.models.Goal
 import com.mealtracker.android.network.models.GoalCreateRequest
 import com.mealtracker.android.network.models.GoalUpdateRequest
@@ -8,6 +9,15 @@ import com.mealtracker.android.network.models.HealthResponse
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemImagePathUpdateRequest
 import com.mealtracker.android.network.models.ItemMacrosUpdateRequest
+import com.mealtracker.android.network.models.GroceryStore
+import com.mealtracker.android.network.models.GroceryStoreCreateRequest
+import com.mealtracker.android.network.models.GroceryListEntry
+import com.mealtracker.android.network.models.GroceryListEntryCreateRequest
+import com.mealtracker.android.network.models.GroceryTrip
+import com.mealtracker.android.network.models.GroceryTripCreateRequest
+import com.mealtracker.android.network.models.MoveEntryToTripRequest
+import com.mealtracker.android.network.models.ResolveEntryRequest
+import com.mealtracker.android.network.models.UpdateEntryQuantityRequest
 import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
@@ -22,11 +32,16 @@ import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeDetail
 import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
+import com.mealtracker.android.network.models.RecipeStep
+import com.mealtracker.android.network.models.RecipeStepCreateRequest
+import com.mealtracker.android.network.models.RecipeStepUpdateRequest
 import com.mealtracker.android.network.models.RecipeUpdateRequest
 import com.mealtracker.android.network.models.UsdaFoodDetail
 import com.mealtracker.android.network.models.UsdaFoodSummary
 import com.mealtracker.android.network.models.UserProfile
 import com.mealtracker.android.network.models.UserProfileUpdateRequest
+import com.mealtracker.android.network.models.WeightHistoryEntry
+import com.mealtracker.android.network.models.WeightHistoryReplaceRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -229,6 +244,45 @@ interface ApiService {
     @PUT("profile/weight-history")
     suspend fun replaceWeightHistory(@Body request: WeightHistoryReplaceRequest): List<WeightHistoryEntry>
 
+    // "+ Add to grocery list" quick action on the item edit dialog (see
+    // design discussion) - fire-and-forget, no response body needed,
+    // matching how this same action works on the web app (adds to the
+    // unassigned pool, sorted into a trip later from the Grocery List
+    // screen itself).
+    @POST("grocery-lists/entries")
+    suspend fun addToGroceryList(@Body request: CreateGroceryEntryRequest)
+
+    // Grocery List screen (see design discussion) - trips and entries.
+    @GET("grocery-lists/trips")
+    suspend fun getGroceryTrips(): List<GroceryTrip>
+
+    @POST("grocery-lists/trips")
+    suspend fun createGroceryTrip(@Body request: GroceryTripCreateRequest): GroceryTrip
+
+    @DELETE("grocery-lists/trips/{tripId}")
+    suspend fun deleteGroceryTrip(@Path("tripId") tripId: Int)
+
+    @GET("grocery-lists/entries")
+    suspend fun getGroceryEntries(): List<GroceryListEntry>
+
+    @POST("grocery-lists/entries")
+    suspend fun createGroceryEntry(@Body request: GroceryListEntryCreateRequest): GroceryListEntry
+
+    // Three distinct bodies for the one PATCH endpoint - see each
+    // request class's own doc comment in Models.kt for why sharing one
+    // "everything optional" body isn't safe here.
+    @PATCH("grocery-lists/entries/{entryId}")
+    suspend fun moveGroceryEntryToTrip(@Path("entryId") entryId: Int, @Body request: MoveEntryToTripRequest): GroceryListEntry
+
+    @PATCH("grocery-lists/entries/{entryId}")
+    suspend fun updateGroceryEntryQuantity(@Path("entryId") entryId: Int, @Body request: UpdateEntryQuantityRequest): GroceryListEntry
+
+    @PATCH("grocery-lists/entries/{entryId}")
+    suspend fun resolveGroceryEntry(@Path("entryId") entryId: Int, @Body request: ResolveEntryRequest): GroceryListEntry
+
+    @DELETE("grocery-lists/entries/{entryId}")
+    suspend fun deleteGroceryEntry(@Path("entryId") entryId: Int)
+
     // Uploads an image, decodes a barcode from it (pyzbar + zxing-cpp
     // fallback, see backend). NEVER auto-creates an item -- caller must
     // show `barcode` to the user for confirmation before using it (see
@@ -260,6 +314,16 @@ interface ApiService {
     // in use by another item.
     @POST("items")
     suspend fun createItem(@Body request: ItemCreateRequest): Item
+
+    // Backs the grocery-store checklist on both the item create screen
+    // and the item edit dialog (see design discussion) - list for
+    // populating the checklist, create for the inline "+ new store"
+    // flow within it.
+    @GET("grocery-stores")
+    suspend fun getGroceryStores(): List<GroceryStore>
+
+    @POST("grocery-stores")
+    suspend fun createGroceryStore(@Body request: GroceryStoreCreateRequest): GroceryStore
 
     // Looks up an item by barcode directly -- used before scanning, to
     // check if a barcode already has a matching item (404 if not).
@@ -311,6 +375,25 @@ interface ApiService {
 
     @DELETE("recipes/{recipeId}/ingredients/{itemId}")
     suspend fun removeRecipeIngredient(@Path("recipeId") recipeId: Int, @Path("itemId") itemId: Int): RecipeDetail
+
+    // Steps (see design discussion) - own endpoints, not bundled into
+    // RecipeUpdateRequest, same reasoning as ingredients: add appends
+    // to the end (step_number assigned server-side), delete renumbers
+    // whatever's left to stay contiguous - both handled entirely on
+    // the backend, this just reflects whatever RecipeDetail it hands
+    // back afterward.
+    @POST("recipes/{recipeId}/steps")
+    suspend fun addRecipeStep(@Path("recipeId") recipeId: Int, @Body request: RecipeStepCreateRequest): RecipeDetail
+
+    @PATCH("recipes/{recipeId}/steps/{stepId}")
+    suspend fun updateRecipeStep(
+        @Path("recipeId") recipeId: Int,
+        @Path("stepId") stepId: Int,
+        @Body request: RecipeStepUpdateRequest
+    ): RecipeDetail
+
+    @DELETE("recipes/{recipeId}/steps/{stepId}")
+    suspend fun deleteRecipeStep(@Path("recipeId") recipeId: Int, @Path("stepId") stepId: Int): RecipeDetail
 
     // Population-level reference ranges backing the Home screen's
     // sodium/added-sugar/saturated-fat threshold card -- static/seeded

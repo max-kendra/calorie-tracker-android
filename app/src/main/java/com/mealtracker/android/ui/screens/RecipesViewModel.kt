@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeDetail
+import com.mealtracker.android.network.models.RecipeStepCreateRequest
+import com.mealtracker.android.network.models.RecipeStepUpdateRequest
 import com.mealtracker.android.network.models.RecipeUpdateRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,11 +45,24 @@ data class RecipesUiState(
 
     val isEditing: Boolean = false,
     val editName: String = "",
-    val editInstructions: String = "",
     val editSourceUrl: String = "",
     val editServings: String = "1",
     val isSaving: Boolean = false,
     val saveError: String? = null,
+
+    // Steps (see design discussion) - own add/edit/delete flow, not
+    // bundled into the metadata save above. newStepText/newStepTimer
+    // back the "+" pane; the rest are per-step-id maps so several rows
+    // can hold independent unsaved edits at once without stepping on
+    // each other.
+    val newStepText: String = "",
+    val newStepTimerInput: String = "",
+    val isAddingStep: Boolean = false,
+    val stepsError: String? = null,
+    val editingStepId: Int? = null,
+    val editStepText: String = "",
+    val editStepTimerInput: String = "",
+    val isSavingStep: Boolean = false,
 
     val isUploadingImage: Boolean = false,
     val imageError: String? = null
@@ -134,7 +149,6 @@ class RecipesViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(
             isEditing = true,
             editName = detail.name,
-            editInstructions = detail.instructions ?: "",
             editSourceUrl = detail.sourceUrl ?: "",
             editServings = detail.servings,
             saveError = null
@@ -146,7 +160,6 @@ class RecipesViewModel : ViewModel() {
     }
 
     fun updateEditName(value: String) { _uiState.value = _uiState.value.copy(editName = value) }
-    fun updateEditInstructions(value: String) { _uiState.value = _uiState.value.copy(editInstructions = value) }
     fun updateEditSourceUrl(value: String) { _uiState.value = _uiState.value.copy(editSourceUrl = value) }
     // Digits only -- same reasoning as CreateRecipeViewModel.updateServings:
     // a recipe's own yield count is a whole number, unlike a logged
@@ -174,7 +187,6 @@ class RecipesViewModel : ViewModel() {
                     recipeId,
                     RecipeUpdateRequest(
                         name = name,
-                        instructions = state.editInstructions.trim().ifEmpty { null },
                         sourceUrl = state.editSourceUrl.trim().ifEmpty { null },
                         servings = servings
                     )
@@ -213,6 +225,84 @@ class RecipesViewModel : ViewModel() {
                     isUploadingImage = false,
                     imageError = e.message ?: "Couldn't update photo"
                 )
+            }
+        }
+    }
+
+    // --- Steps (see design discussion) ---
+
+    fun updateNewStepText(value: String) { _uiState.value = _uiState.value.copy(newStepText = value) }
+    fun updateNewStepTimerInput(value: String) { _uiState.value = _uiState.value.copy(newStepTimerInput = value.filter { it.isDigit() }) }
+
+    fun addStep() {
+        val recipeId = _uiState.value.selectedRecipeId ?: return
+        val text = _uiState.value.newStepText.trim()
+        if (text.isEmpty()) return
+        val timerSeconds = _uiState.value.newStepTimerInput.toIntOrNull()
+
+        _uiState.value = _uiState.value.copy(isAddingStep = true, stepsError = null)
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.addRecipeStep(recipeId, RecipeStepCreateRequest(text = text, timerSeconds = timerSeconds))
+                _uiState.value = _uiState.value.copy(
+                    recipeDetail = updated,
+                    newStepText = "",
+                    newStepTimerInput = "",
+                    isAddingStep = false
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isAddingStep = false, stepsError = e.message ?: "Couldn't add that step")
+            }
+        }
+    }
+
+    /** Tap-to-edit, one step at a time - not every row holding its own
+     * always-editable local state - simpler on a touchscreen, and
+     * "add one step at a time" was the actual ask, not simultaneous
+     * multi-row editing. */
+    fun startEditingStep(stepId: Int) {
+        val step = _uiState.value.recipeDetail?.steps?.firstOrNull { it.id == stepId } ?: return
+        _uiState.value = _uiState.value.copy(
+            editingStepId = stepId,
+            editStepText = step.text,
+            editStepTimerInput = step.timerSeconds?.toString() ?: "",
+            stepsError = null
+        )
+    }
+
+    fun cancelEditingStep() {
+        _uiState.value = _uiState.value.copy(editingStepId = null, stepsError = null)
+    }
+
+    fun updateEditStepText(value: String) { _uiState.value = _uiState.value.copy(editStepText = value) }
+    fun updateEditStepTimerInput(value: String) { _uiState.value = _uiState.value.copy(editStepTimerInput = value.filter { it.isDigit() }) }
+
+    fun saveEditingStep() {
+        val recipeId = _uiState.value.selectedRecipeId ?: return
+        val stepId = _uiState.value.editingStepId ?: return
+        val text = _uiState.value.editStepText.trim()
+        if (text.isEmpty()) return
+        val timerSeconds = _uiState.value.editStepTimerInput.toIntOrNull()
+
+        _uiState.value = _uiState.value.copy(isSavingStep = true, stepsError = null)
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.updateRecipeStep(recipeId, stepId, RecipeStepUpdateRequest(text = text, timerSeconds = timerSeconds))
+                _uiState.value = _uiState.value.copy(recipeDetail = updated, editingStepId = null, isSavingStep = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isSavingStep = false, stepsError = e.message ?: "Couldn't save that step")
+            }
+        }
+    }
+
+    fun deleteStep(stepId: Int) {
+        val recipeId = _uiState.value.selectedRecipeId ?: return
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.deleteRecipeStep(recipeId, stepId)
+                _uiState.value = _uiState.value.copy(recipeDetail = updated, editingStepId = null)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(stepsError = e.message ?: "Couldn't remove that step")
             }
         }
     }

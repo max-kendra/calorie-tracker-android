@@ -894,6 +894,18 @@ fun MealDetailScreen(
                 countsAsAddedSugar = state.editItemCountsAsAddedSugar,
                 isSaving = state.isSavingItemEdit,
                 error = state.editItemError,
+                isAddingToGroceryList = state.isAddingToGroceryList,
+                addedToGroceryList = state.addedToGroceryList,
+                addToGroceryListError = state.addToGroceryListError,
+                onAddToGroceryListClick = { viewModel.addItemToGroceryList() },
+                groceryStores = state.editItemGroceryStores,
+                selectedGroceryStoreIds = state.editItemSelectedStoreIds,
+                newStoreNameInput = state.editItemNewStoreNameInput,
+                isCreatingStore = state.editItemIsCreatingStore,
+                groceryStoresError = state.editItemGroceryStoresError,
+                onToggleGroceryStore = { viewModel.toggleEditItemGroceryStore(it) },
+                onNewStoreNameChange = { viewModel.updateEditItemNewStoreName(it) },
+                onCreateGroceryStore = { viewModel.createEditItemGroceryStore() },
                 onNameChange = { viewModel.updateEditItemName(it) },
                 onKcalChange = { viewModel.updateEditItemKcal(it) },
                 onProteinChange = { viewModel.updateEditItemProtein(it) },
@@ -2525,6 +2537,18 @@ private fun EditItemDialog(
     countsAsAddedSugar: Boolean,
     isSaving: Boolean,
     error: String?,
+    isAddingToGroceryList: Boolean,
+    addedToGroceryList: Boolean,
+    addToGroceryListError: String?,
+    onAddToGroceryListClick: () -> Unit,
+    groceryStores: List<com.mealtracker.android.network.models.GroceryStore>,
+    selectedGroceryStoreIds: Set<Int>,
+    newStoreNameInput: String,
+    isCreatingStore: Boolean,
+    groceryStoresError: String?,
+    onToggleGroceryStore: (Int) -> Unit,
+    onNewStoreNameChange: (String) -> Unit,
+    onCreateGroceryStore: () -> Unit,
     onNameChange: (String) -> Unit,
     onKcalChange: (String) -> Unit,
     onProteinChange: (String) -> Unit,
@@ -2555,6 +2579,27 @@ private fun EditItemDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                // "+ Add to grocery list" quick action (see design
+                // discussion) - a plain fire-and-forget button, not its
+                // own dialog. Full store-assignment management (which
+                // stores carry this item) is a separate, bigger
+                // follow-up, not built here yet.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(onClick = onAddToGroceryListClick, enabled = !isAddingToGroceryList) {
+                        Text(if (isAddingToGroceryList) "Adding..." else "+ Add to grocery list")
+                    }
+                    if (addedToGroceryList) {
+                        Text("Added", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (addToGroceryListError != null) {
+                    Text(addToGroceryListError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
                 Text(
                     "Per 100g",
@@ -2598,6 +2643,46 @@ private fun EditItemDialog(
                 EditNumberField("Fiber (g)", fiber, onFiberChange)
                 EditNumberField("Protein (g)", protein, onProteinChange)
                 EditNumberField("Salt (g)", saltG, onSaltChange, isLast = true)
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                Text("Grocery stores", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Which stores carry this item - the same product/brand can be sold in more than one, so pick as many as apply.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                groceryStores.forEach { store ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = { onToggleGroceryStore(store.id) }),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.Checkbox(
+                            checked = selectedGroceryStoreIds.contains(store.id),
+                            onCheckedChange = { onToggleGroceryStore(store.id) }
+                        )
+                        Text(store.name, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                if (groceryStoresError != null) {
+                    Text(groceryStoresError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = newStoreNameInput,
+                        onValueChange = onNewStoreNameChange,
+                        label = { Text("New store name") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                    TextButton(onClick = onCreateGroceryStore, enabled = !isCreatingStore && newStoreNameInput.isNotBlank()) {
+                        Text(if (isCreatingStore) "Adding..." else "Add")
+                    }
+                }
+
                 if (error != null) {
                     Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }

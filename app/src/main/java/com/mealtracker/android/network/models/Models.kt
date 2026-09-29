@@ -59,6 +59,7 @@ data class Item(
     // single MealDetailViewModel instance, which is fresh per meal).
     @SerialName("last_logged_quantity") val lastLoggedQuantity: String? = null,
     @SerialName("last_logged_serving_size_id") val lastLoggedServingSizeId: Int? = null,
+    @SerialName("grocery_stores") val groceryStores: List<GroceryStore> = emptyList(),
     // Manual override for the origin-based "countable sugar" heuristic
     // used in weekly summaries -- null = use the origin heuristic
     // (raw USDA ingredient = not added sugar); true/false = force
@@ -309,11 +310,12 @@ data class RecipeCreateRequest(
 )
 
 /** Partial update for recipe metadata -- mirrors RecipeUpdate on the
- * backend. All fields optional, send only what changed. */
+ * backend. All fields optional, send only what changed. Steps are
+ * managed via their own endpoints (add/update/delete), not through
+ * this - same reasoning as ingredients. */
 @Serializable
 data class RecipeUpdateRequest(
     val name: String? = null,
-    val instructions: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
     val servings: Double? = null,
     @SerialName("image_path") val imagePath: String? = null
@@ -407,11 +409,11 @@ data class RecipeDetail(
     @SerialName("recipe_id") val recipeId: Int,
     val name: String,
     @SerialName("recipe_type") val recipeType: String = "recipe",
-    val instructions: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
     val ingredients: List<RecipeIngredient> = emptyList(),
+    val steps: List<RecipeStep> = emptyList(),
     val totals: ExtendedNutritionTotals,
     @SerialName("totals_per_serving") val totalsPerServing: ExtendedNutritionTotals
 )
@@ -586,7 +588,13 @@ data class ItemCreateRequest(
     // create-then-immediately-edit round trip.
     @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null,
     val type: String = "product",
-    val origin: String = "manual"
+    val origin: String = "manual",
+    // Omitted entirely if null (not touched) - the backend's own
+    // ItemCreate defaults this to an empty list when omitted, so there
+    // is no need to force-send [] explicitly (see design discussion -
+    // grocery stores now assignable at creation time, not just via a
+    // later edit).
+    @SerialName("grocery_store_ids") val groceryStoreIds: List<Int>? = null
 )
 
 /**
@@ -667,7 +675,14 @@ data class ItemMacrosUpdateRequest(
     // to "use the heuristic" would never actually reach the backend.
     // Forcing this one field to always serialize sidesteps that.
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null
+    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null,
+    // null = don't touch (same convention as every other optional
+    // field here, unlike countsAsAddedSugar above) - an actual list,
+    // INCLUDING an empty one, replaces the full set of stores
+    // wholesale. No @EncodeDefault needed - null genuinely only ever
+    // means "not touched" for this field, no second reachable meaning
+    // to disambiguate from (see design discussion).
+    @SerialName("grocery_store_ids") val groceryStoreIds: List<Int>? = null
 )
 
 /**
@@ -717,4 +732,152 @@ data class WeightHistoryEntryInRequest(
 @Serializable
 data class WeightHistoryReplaceRequest(
     val entries: List<WeightHistoryEntryInRequest>
+)
+/**
+ * Body for POST /grocery-lists/entries - the "+ Add to grocery list"
+ * quick action on the item edit dialog (see design discussion). Just
+ * item_id - trip_id/quantity are left unset, matching how this entry
+ * point on the web app works too (add to the unassigned pool now, sort
+ * it into a trip later from the Grocery List screen itself).
+ */
+@Serializable
+data class CreateGroceryEntryRequest(
+    @SerialName("item_id") val itemId: Int
+)
+
+/** Mirrors GroceryStoreOut from app/schemas.py. */
+@Serializable
+data class GroceryStore(
+    val id: Int,
+    val name: String
+)
+
+/** Body for POST /grocery-stores - the inline "create a new store"
+ * flow in the item create/edit forms (see design discussion). */
+@Serializable
+data class GroceryStoreCreateRequest(
+    val name: String
+)
+
+/** Mirrors GroceryTripOut - a planned shopping trip, assigned AT MOST
+ * one store (see design discussion: revised from an earlier
+ * any-store-with-a-filter design - one store per trip is closer to
+ * how shopping trips actually work, and it means a trip can actually
+ * reject an incompatible item rather than just visually filtering it
+ * afterward). storeId/store null means "no particular store" - a
+ * valid catch-all a store-agnostic item can always go into.
+ */
+@Serializable
+data class GroceryTrip(
+    val id: Int,
+    val date: String,
+    val label: String? = null,
+    @SerialName("store_id") val storeId: Int? = null,
+    val store: GroceryStore? = null
+)
+
+@Serializable
+data class GroceryTripCreateRequest(
+    val date: String,
+    val label: String? = null,
+    @SerialName("store_id") val storeId: Int? = null
+)
+
+/** Mirrors GroceryListEntryOut. itemId is null exactly when
+ * isPlaceholder is true - see design discussion, the hot dog buns
+ * example: knowing you need something before you've found/scanned the
+ * actual product. itemName is always populated either way (the real
+ * item's name, or the placeholder text), so the UI never needs to
+ * branch on which kind of entry this is just to show something.
+ */
+@Serializable
+data class GroceryListEntry(
+    val id: Int,
+    @SerialName("item_id") val itemId: Int? = null,
+    @SerialName("item_name") val itemName: String,
+    @SerialName("is_placeholder") val isPlaceholder: Boolean,
+    @SerialName("grocery_stores") val groceryStores: List<GroceryStore> = emptyList(),
+    @SerialName("trip_id") val tripId: Int? = null,
+    val quantity: String? = null
+)
+
+/** Body for POST /grocery-lists/entries - exactly one of itemId/
+ * placeholderName, never both, never neither (enforced by the
+ * backend, not here - see its own docstring). */
+@Serializable
+data class GroceryListEntryCreateRequest(
+    @SerialName("item_id") val itemId: Int? = null,
+    @SerialName("placeholder_name") val placeholderName: String? = null,
+    @SerialName("trip_id") val tripId: Int? = null,
+    val quantity: String? = null
+)
+
+/** Three separate request shapes for PATCH /grocery-lists/entries/{id}
+ * instead of one shared "everything optional" class - see design
+ * discussion, the same null-has-two-meanings problem as
+ * countsAsAddedSugar elsewhere in this file: a null tripId needs to
+ * mean "move back to the pool" (must always be SENT), while an
+ * omitted quantity/itemId needs to mean "don't touch" (must NOT be
+ * sent) - one shared class can't satisfy both without EncodeDefault on
+ * tripId, which would then also force quantity/itemId to be
+ * (re)sent on every single move-to-trip call, silently overwriting
+ * whichever of those the caller didn't intend to touch. Three
+ * separate bodies hitting the same endpoint path avoids that entirely
+ * - Retrofit doesn't care that they share a URL.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class MoveEntryToTripRequest(
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    @SerialName("trip_id") val tripId: Int?
+)
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class UpdateEntryQuantityRequest(
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val quantity: String?
+)
+
+/** Resolving a placeholder into a real item (see design discussion) -
+ * always a real id, never null, so no EncodeDefault ambiguity here at
+ * all. */
+@Serializable
+data class ResolveEntryRequest(
+    @SerialName("item_id") val itemId: Int
+)
+
+/** Mirrors RecipeStepOut - one ordered instruction step. Its own table
+ * on the backend, not a single instructions blob (see design
+ * discussion: same reasoning as ingredients being their own table -
+ * lets each step be added/removed independently, and is what makes a
+ * future cooking-mode view or per-step timer possible without a
+ * rework). timerSeconds is a plain, manually-set duration - no
+ * auto-detection from the step's own text (that would need real
+ * tokenization for what's ultimately a low-value feature here, see
+ * design discussion).
+ */
+@Serializable
+data class RecipeStep(
+    val id: Int,
+    @SerialName("step_number") val stepNumber: Int,
+    val text: String,
+    @SerialName("timer_seconds") val timerSeconds: Int? = null
+)
+
+@Serializable
+data class RecipeStepCreateRequest(
+    val text: String,
+    @SerialName("timer_seconds") val timerSeconds: Int? = null
+)
+
+/** Always a full save of the row's current text+timer together (see
+ * the screen's own StepRow) rather than a true partial update - so
+ * text doesn't need to be optional, and a null timerSeconds
+ * unambiguously means "no timer", with no EncodeDefault trickery
+ * needed the way MoveEntryToTripRequest elsewhere needs it. */
+@Serializable
+data class RecipeStepUpdateRequest(
+    val text: String,
+    @SerialName("timer_seconds") val timerSeconds: Int? = null
 )

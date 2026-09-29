@@ -39,6 +39,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -1102,10 +1103,57 @@ private fun ItemFormContent(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+
         NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
         NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
         NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt, isLast = true)
+
+        // Genuinely after every macro field now, not sandwiched
+        // between Sugar and Fiber (see design discussion / bug
+        // report) - it was originally inserted right after the
+        // added-sugar toggle without checking what field actually
+        // came next in the form.
+        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+        Text("Grocery stores", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Which stores carry this item - the same product/brand can be sold in more than one, so pick as many as apply.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        state.groceryStores.forEach { store ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = { viewModel.toggleGroceryStore(store.id) }),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = state.selectedGroceryStoreIds.contains(store.id),
+                    onCheckedChange = { viewModel.toggleGroceryStore(store.id) }
+                )
+                Text(store.name, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        if (state.groceryStoresError != null) {
+            Text(state.groceryStoresError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            OutlinedTextField(
+                value = state.newStoreNameInput,
+                onValueChange = viewModel::updateNewStoreName,
+                label = { Text("New store name") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+            androidx.compose.material3.TextButton(
+                onClick = viewModel::createGroceryStore,
+                enabled = !state.isCreatingStore && state.newStoreNameInput.isNotBlank()
+            ) {
+                Text(if (state.isCreatingStore) "Adding..." else "Add")
+            }
+        }
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 

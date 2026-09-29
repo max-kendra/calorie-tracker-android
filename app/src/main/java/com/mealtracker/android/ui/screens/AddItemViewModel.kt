@@ -3,6 +3,8 @@ package com.mealtracker.android.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
+import com.mealtracker.android.network.models.GroceryStore
+import com.mealtracker.android.network.models.GroceryStoreCreateRequest
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.LogCreateRequest
@@ -88,6 +90,15 @@ enum class AddItemPhase {
 data class AddItemUiState(
     val phase: AddItemPhase = AddItemPhase.SCAN_BARCODE,
     val scanError: String? = null,
+
+    // Grocery-store checklist (see design discussion: assignable at
+    // creation time now, not just via a later edit) - fetched once,
+    // eagerly, in the ViewModel's init block.
+    val groceryStores: List<GroceryStore> = emptyList(),
+    val selectedGroceryStoreIds: Set<Int> = emptySet(),
+    val newStoreNameInput: String = "",
+    val isCreatingStore: Boolean = false,
+    val groceryStoresError: String? = null,
 
     // Shown when the live barcode scan times out with nothing detected.
     val showManualEntryPrompt: Boolean = false,
@@ -186,6 +197,60 @@ class AddItemViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(AddItemUiState())
     val uiState: StateFlow<AddItemUiState> = _uiState
+
+    init {
+        // Fetched eagerly rather than lazily on first checklist render -
+        // the form's macro/type fields are visible immediately, and
+        // stores populate in the background by the time anyone actually
+        // scrolls to that section (see design discussion: grocery
+        // stores now assignable at creation time, not just via a later
+        // edit).
+        loadGroceryStores()
+    }
+
+    private fun loadGroceryStores() {
+        viewModelScope.launch {
+            try {
+                val stores = ApiClient.service.getGroceryStores()
+                _uiState.value = _uiState.value.copy(groceryStores = stores)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(groceryStoresError = e.message ?: "Couldn't load grocery stores")
+            }
+        }
+    }
+
+    fun toggleGroceryStore(storeId: Int) {
+        val current = _uiState.value.selectedGroceryStoreIds
+        val updated = if (current.contains(storeId)) current - storeId else current + storeId
+        _uiState.value = _uiState.value.copy(selectedGroceryStoreIds = updated)
+    }
+
+    fun updateNewStoreName(value: String) {
+        _uiState.value = _uiState.value.copy(newStoreNameInput = value)
+    }
+
+    fun createGroceryStore() {
+        val name = _uiState.value.newStoreNameInput.trim()
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isCreatingStore = true, groceryStoresError = null)
+            try {
+                val store = ApiClient.service.createGroceryStore(GroceryStoreCreateRequest(name = name))
+                val current = _uiState.value
+                _uiState.value = current.copy(
+                    groceryStores = current.groceryStores + store,
+                    selectedGroceryStoreIds = current.selectedGroceryStoreIds + store.id,
+                    newStoreNameInput = "",
+                    isCreatingStore = false
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isCreatingStore = false,
+                    groceryStoresError = e.message ?: "Couldn't create store"
+                )
+            }
+        }
+    }
 
     // Set once (see MealDetailScreen, which embeds this whole flow
     // inline in its Add Item sheet) so saveItem()/useMatchedItem() know
@@ -672,7 +737,8 @@ class AddItemViewModel : ViewModel() {
                             state.usdaImportUsed -> "usda_import"
                             state.ocrWasUsed -> "ocr_assisted"
                             else -> "manual"
-                        }
+                        },
+                        groceryStoreIds = state.selectedGroceryStoreIds.toList().ifEmpty { null }
                     )
                 )
                 _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
