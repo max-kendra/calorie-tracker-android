@@ -1713,6 +1713,13 @@ private fun RecipeInfoScreen(
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
                 Text("Ingredients", style = MaterialTheme.typography.titleSmall)
+                if (usingFrozenSnapshot) {
+                    Text(
+                        "Full recipe, as made that day",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
                 if (displayIngredients.isEmpty()) {
                     Text(

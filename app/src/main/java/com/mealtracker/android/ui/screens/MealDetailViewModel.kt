@@ -168,10 +168,22 @@ fun Log.toFrozenTotals(): ExtendedNutritionTotals = ExtendedNutritionTotals(
  * deleted from the catalog since - see LoggedRecipeIngredientOut's own
  * doc comment) since RecipeIngredient's itemId isn't nullable and
  * nothing here actually navigates using it, only displays it. */
-fun LoggedRecipeIngredientOut.toRecipeIngredient(): RecipeIngredient = RecipeIngredient(
+/**
+ * scaleToFullBatch: multiplies the frozen `quantity` up from "the
+ * portion actually eaten" (what's stored) to "the whole batch, exactly
+ * as the recipe existed when this was logged" (see design discussion:
+ * "when I'm cooking I usually just tap into the logged instance" -
+ * a fraction of a serving is useless there, and today's live recipe
+ * could have drifted since). Computed once at the call site as
+ * recipeServingsLoggedAtThatTime / loggedServings - both already
+ * frozen on the Log itself, so this is pure arithmetic on existing
+ * data, no new fields needed. Pass 1.0 to keep the old "just the
+ * portion eaten" behavior.
+ */
+fun LoggedRecipeIngredientOut.toRecipeIngredient(scaleToFullBatch: Double = 1.0): RecipeIngredient = RecipeIngredient(
     itemId = itemId ?: 0,
     servingSizeId = servingSizeId,
-    quantity = quantity,
+    quantity = quantity.toDoubleOrNull()?.let { (it * scaleToFullBatch).toString() } ?: quantity,
     itemName = itemName,
     servingSizeName = servingSizeName,
     servingSizeWeightG = servingSizeWeightG,
@@ -1863,7 +1875,22 @@ class MealDetailViewModel : ViewModel() {
             // ingredientScaleFactor logic).
             recipeLogFrozenTotals = if (log.hasIngredientSnapshot) log.toFrozenTotals() else null,
             recipeLogFrozenIngredients = if (log.hasIngredientSnapshot) {
-                log.ingredients.map { it.toRecipeIngredient() }
+                // Scales each frozen ingredient up from "the portion
+                // actually eaten" to "the whole batch, as the recipe
+                // existed that day" (see toRecipeIngredient's own doc
+                // comment / design discussion). loggedServings and
+                // recipeServingsAtLogTime are both already frozen on
+                // the Log itself - falls back to 1.0 (old behavior)
+                // if either is missing/unparseable rather than divide
+                // by zero or show garbage.
+                val loggedServings = log.quantity.toDoubleOrNull()
+                val recipeServingsAtLogTime = log.recipeServingsLogged?.toDoubleOrNull()
+                val scaleToFullBatch = if (loggedServings != null && loggedServings > 0 && recipeServingsAtLogTime != null) {
+                    recipeServingsAtLogTime / loggedServings
+                } else {
+                    1.0
+                }
+                log.ingredients.map { it.toRecipeIngredient(scaleToFullBatch) }
             } else {
                 null
             },
