@@ -240,6 +240,13 @@ data class Goal(
 @Serializable
 data class GoalCreateRequest(
     @SerialName("start_date") val startDate: String,
+    // Null (the default) means open-ended/ongoing - matches the
+    // backend's own default and the "Ongoing" toggle on the web app's
+    // equivalent form. Creating a goal automatically closes whatever
+    // goal was previously open-ended (see backend create_goal), so
+    // this field is only for the rarer case of a deliberately
+    // scheduled, already-bounded goal.
+    @SerialName("end_date") val endDate: String? = null,
     @SerialName("kcal_target") val kcalTarget: Double,
     @SerialName("protein_g_target") val proteinGTarget: Double,
     @SerialName("carbs_g_target") val carbsGTarget: Double,
@@ -251,10 +258,18 @@ data class GoalCreateRequest(
 
 /**
  * Request body for PATCH /goals/{id}. All fields optional, matching the
- * backend's GoalUpdate schema - send only what actually changed.
+ * backend's GoalUpdate schema - send only what actually changed. null
+ * means "don't touch" for every field here, including the two dates -
+ * there's no way to express "clear end_date back to ongoing" through
+ * this DTO as written (send a real value or omit it), matching how the
+ * backend's own exclude_unset convention works: a field has to be SENT
+ * to change it at all, and "sent as literally null" isn't
+ * distinguishable from "not sent" in this request shape.
  */
 @Serializable
 data class GoalUpdateRequest(
+    @SerialName("start_date") val startDate: String? = null,
+    @SerialName("end_date") val endDate: String? = null,
     @SerialName("kcal_target") val kcalTarget: Double? = null,
     @SerialName("protein_g_target") val proteinGTarget: Double? = null,
     @SerialName("carbs_g_target") val carbsGTarget: Double? = null,

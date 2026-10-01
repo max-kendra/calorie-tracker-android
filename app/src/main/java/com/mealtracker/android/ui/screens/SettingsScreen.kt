@@ -41,6 +41,7 @@ fun SettingsScreen(
     onNavigateToMealCalorieGoal: () -> Unit,
     onNavigateToMacronutrients: () -> Unit,
     onNavigateToWeightGoal: () -> Unit,
+    onNavigateToEditGoals: () -> Unit,
     onNavigateToHealthConnect: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceChange: (ThemePreference) -> Unit
@@ -75,6 +76,7 @@ fun SettingsScreen(
         SettingsRow("Calorie goals by meal", "Change calories for each meal", onNavigateToMealCalorieGoal)
         SettingsRow("Fat, carbs, fiber and protein goals", "Edit your macronutrient goals", onNavigateToMacronutrients)
         SettingsRow("Weight goal", "Set your starting and goal weight", onNavigateToWeightGoal)
+        SettingsRow("Edit goals", "Manage goal history and scheduling", onNavigateToEditGoals)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
 

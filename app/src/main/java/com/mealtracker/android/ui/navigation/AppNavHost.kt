@@ -32,13 +32,17 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import com.mealtracker.android.ui.theme.ThemePreference
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.mealtracker.android.ui.screens.CalorieGoalScreen
 import com.mealtracker.android.ui.screens.EditProfileScreen
+import com.mealtracker.android.ui.screens.GoalEditFlowScreen
+import com.mealtracker.android.ui.screens.GoalListScreen
 import com.mealtracker.android.ui.screens.HealthConnectSettingsScreen
 import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.GroceryListScreen
@@ -240,9 +244,34 @@ fun AppNavHost(
                     onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
                     onNavigateToMacronutrients = { navController.navigate("macronutrients") },
                     onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") },
+                    onNavigateToEditGoals = { navController.navigate("goal_list") },
                     onNavigateToHealthConnect = { navController.navigate("profile_settings/health_connect") },
                     themePreference = themePreference,
                     onThemePreferenceChange = onThemePreferenceChange
+                )
+            }
+            // Goal List (see design discussion) - sits alongside the
+            // three existing quick-edit screens above, not replacing
+            // them. goal_edit's goalId arg is nullable: present when
+            // editing an existing goal, absent when creating a new one.
+            composable("goal_list") {
+                GoalListScreen(
+                    onBack = { navController.popBackStack() },
+                    onEditGoal = { goalId -> navController.navigate("goal_edit?goalId=$goalId") },
+                    onNewGoal = { navController.navigate("goal_edit") }
+                )
+            }
+            composable(
+                "goal_edit?goalId={goalId}",
+                arguments = listOf(navArgument("goalId") {
+                    type = NavType.IntType
+                    defaultValue = -1
+                })
+            ) { backStackEntry ->
+                val goalId = backStackEntry.arguments?.getInt("goalId") ?: -1
+                GoalEditFlowScreen(
+                    goalId = if (goalId == -1) null else goalId,
+                    onDone = { navController.popBackStack() }
                 )
             }
             composable("profile_settings/edit") {

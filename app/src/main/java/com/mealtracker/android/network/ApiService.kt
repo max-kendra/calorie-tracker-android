@@ -193,10 +193,26 @@ interface ApiService {
     @GET("goals/active")
     suspend fun getActiveGoal(): Goal
 
+    // Every goal, current/upcoming/past alike - backs the Goal List
+    // screen (see design discussion). No date filtering server-side;
+    // the screen groups these into current/upcoming/past itself,
+    // matching how the web app's own goal list already works.
+    @GET("goals")
+    suspend fun getGoalsList(): List<Goal>
+
+    // One specific goal by id - backs opening any goal (past, current,
+    // or upcoming) from the Goal List for editing, not just whichever
+    // one happens to be active right now (that's getActiveGoal above).
+    @GET("goals/{goalId}")
+    suspend fun getGoal(@Path("goalId") goalId: Int): Goal
+
     // Creates the first goal, or a new one (auto-closes the previous
     // active goal server-side -- see backend app/routers/goals.py).
     @POST("goals")
     suspend fun createGoal(@Body request: GoalCreateRequest): Goal
+
+    @DELETE("goals/{goalId}")
+    suspend fun deleteGoal(@Path("goalId") goalId: Int)
 
     // Updates an existing goal's targets in place.
     @PATCH("goals/{goalId}")
