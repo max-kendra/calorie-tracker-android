@@ -24,6 +24,12 @@ import java.time.format.DateTimeFormatter
 
 private const val RESOLVE_SEARCH_DEBOUNCE_MS = 350L
 
+/** Asks the screen to open the embedded AddItemScreen flow (the same
+ * scan/search/create flow the meal-logging and recipe screens already
+ * embed). usdaQuery non-null starts it directly in the USDA search with
+ * that text prefilled; null starts at the normal create-item entry. */
+data class AddItemFlowRequest(val usdaQuery: String?)
+
 data class GroceryListUiState(
     val isLoading: Boolean = true,
     val loadError: String? = null,
@@ -46,11 +52,17 @@ data class GroceryListUiState(
     val isCreatingTrip: Boolean = false,
     val newTripError: String? = null,
 
-    // Plain-text placeholder entry (see design discussion: the hot dog
-    // buns example - knowing you need something before you've
-    // found/scanned the actual product).
+    // The add field. Doubles as the search box for existing items (see
+    // addSearchResults) and as the name for a placeholder entry (see
+    // design discussion: the hot dog buns example - knowing you need
+    // something before you've found/scanned the actual product), the
+    // same way the web app's add field works.
     val newPlaceholderInput: String = "",
     val isAddingPlaceholder: Boolean = false,
+    val addSearchResults: List<Item> = emptyList(),
+    val isSearchingAdd: Boolean = false,
+    val isAddingEntry: Boolean = false,
+    val addItemFlow: AddItemFlowRequest? = null,
 
     // Inline resolve-placeholder search, opened per-entry.
     val resolvingEntryId: Int? = null,
@@ -72,6 +84,7 @@ class GroceryListViewModel : ViewModel() {
     val uiState: StateFlow<GroceryListUiState> = _uiState
 
     private var resolveSearchJob: Job? = null
+    private var addSearchJob: Job? = null
 
     init {
         load()
@@ -158,7 +171,64 @@ class GroceryListViewModel : ViewModel() {
     // --- Placeholder entries (see design discussion) ---
 
     fun updateNewPlaceholderInput(value: String) {
-        _uiState.value = _uiState.value.copy(newPlaceholderInput = value)
+        addSearchJob?.cancel()
+        if (value.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                newPlaceholderInput = value,
+                addSearchResults = emptyList(),
+                isSearchingAdd = false
+            )
+            return
+        }
+        // isSearchingAdd flips on immediately, not after the debounce -
+        // otherwise "No matches" would flash for the first moment after
+        // each keystroke, before the search had even started.
+        _uiState.value = _uiState.value.copy(newPlaceholderInput = value, isSearchingAdd = true)
+        addSearchJob = viewModelScope.launch {
+            delay(RESOLVE_SEARCH_DEBOUNCE_MS)
+            try {
+                val results = ApiClient.service.searchItems(query = value.trim())
+                _uiState.value = _uiState.value.copy(addSearchResults = results, isSearchingAdd = false)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isSearchingAdd = false)
+            }
+        }
+    }
+
+    /** Adds a real catalog item straight to the pool - from tapping a
+     * search result, or from the embedded create-item flow's "add to
+     * grocery list" action (which is why this also closes that flow). */
+    fun addExistingItem(item: Item) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isAddingEntry = true, actionError = null)
+            try {
+                val entry = ApiClient.service.createGroceryEntry(GroceryListEntryCreateRequest(itemId = item.itemId))
+                addSearchJob?.cancel()
+                _uiState.value = _uiState.value.copy(
+                    entries = _uiState.value.entries + entry,
+                    newPlaceholderInput = "",
+                    addSearchResults = emptyList(),
+                    isSearchingAdd = false,
+                    isAddingEntry = false,
+                    addItemFlow = null
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isAddingEntry = false, actionError = e.message ?: "Couldn't add that")
+            }
+        }
+    }
+
+    fun openAddItemFlow(searchUsda: Boolean) {
+        val query = _uiState.value.newPlaceholderInput.trim()
+        _uiState.value = _uiState.value.copy(
+            addItemFlow = AddItemFlowRequest(usdaQuery = if (searchUsda) query else null)
+        )
+    }
+
+    fun closeAddItemFlow() {
+        _uiState.value = _uiState.value.copy(addItemFlow = null)
     }
 
     fun addPlaceholder() {
@@ -168,9 +238,12 @@ class GroceryListViewModel : ViewModel() {
             _uiState.value = _uiState.value.copy(isAddingPlaceholder = true, actionError = null)
             try {
                 val entry = ApiClient.service.createGroceryEntry(GroceryListEntryCreateRequest(placeholderName = name))
+                addSearchJob?.cancel()
                 _uiState.value = _uiState.value.copy(
                     entries = _uiState.value.entries + entry,
                     newPlaceholderInput = "",
+                    addSearchResults = emptyList(),
+                    isSearchingAdd = false,
                     isAddingPlaceholder = false
                 )
             } catch (e: Exception) {

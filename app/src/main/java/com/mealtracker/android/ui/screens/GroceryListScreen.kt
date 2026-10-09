@@ -1,5 +1,6 @@
 package com.mealtracker.android.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,33 +71,43 @@ import com.mealtracker.android.network.models.Item
 fun GroceryListScreen(viewModel: GroceryListViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsState()
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(onClick = { viewModel.openNewTripSheet() }) {
-                Icon(Icons.Filled.Add, contentDescription = "New trip")
-            }
-        }
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            when {
-                state.isLoading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            floatingActionButton = {
+                FloatingActionButton(onClick = { viewModel.openNewTripSheet() }) {
+                    Icon(Icons.Filled.Add, contentDescription = "New trip")
                 }
-                state.loadError != null -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(state.loadError!!, color = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(onClick = { viewModel.load() }) { Text("Retry") }
+            }
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                when {
+                    state.isLoading -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
                         }
                     }
-                }
-                else -> {
-                    GroceryListContent(state = state, viewModel = viewModel)
+                    state.loadError != null -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(state.loadError!!, color = MaterialTheme.colorScheme.error)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(onClick = { viewModel.load() }) { Text("Retry") }
+                            }
+                        }
+                    }
+                    else -> {
+                        GroceryListContent(state = state, viewModel = viewModel)
+                    }
                 }
             }
+        }
+        val addItemFlow = state.addItemFlow
+        if (addItemFlow != null) {
+            AddItemFlowOverlay(
+                request = addItemFlow,
+                onUseItem = { item -> viewModel.addExistingItem(item) },
+                onClose = { viewModel.closeAddItemFlow() }
+            )
         }
     }
 
@@ -154,6 +167,8 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
         item {
             Spacer(modifier = Modifier.height(12.dp))
             Text("Not yet planned", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            AddToListSection(state = state, viewModel = viewModel)
             Spacer(modifier = Modifier.height(4.dp))
         }
         if (poolByStore.isEmpty()) {
@@ -187,13 +202,6 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
         }
 
         item {
-            Spacer(modifier = Modifier.height(8.dp))
-            NewPlaceholderRow(
-                input = state.newPlaceholderInput,
-                isAdding = state.isAddingPlaceholder,
-                onInputChange = { viewModel.updateNewPlaceholderInput(it) },
-                onAdd = { viewModel.addPlaceholder() }
-            )
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             Text("Trips", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(4.dp))
@@ -299,20 +307,98 @@ private fun GroceryEntryRow(
     }
 }
 
+/** Search-first add field (see design discussion): type to search your
+ * existing items and tap one to add it; a placeholder, a USDA lookup and
+ * a plain new item are the fallbacks when nothing fits. Same shape as the
+ * web app's add field. */
 @Composable
-private fun NewPlaceholderRow(input: String, isAdding: Boolean, onInputChange: (String) -> Unit, onAdd: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+private fun AddToListSection(state: GroceryListUiState, viewModel: GroceryListViewModel) {
+    val query = state.newPlaceholderInput
+    val trimmed = query.trim()
+    val results = state.addSearchResults.take(5)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
-            value = input,
-            onValueChange = onInputChange,
-            placeholder = { Text("No product yet? Add a name") },
+            value = query,
+            onValueChange = { viewModel.updateNewPlaceholderInput(it) },
+            placeholder = { Text("Search your items to add...") },
             singleLine = true,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.width(8.dp))
-        TextButton(onClick = onAdd, enabled = !isAdding && input.isNotBlank()) {
-            Text(if (isAdding) "Adding..." else "Add")
+        if (trimmed.isNotEmpty()) {
+            if (state.isSearchingAdd && results.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                }
+            }
+            results.forEach { item ->
+                Surface(
+                    onClick = { viewModel.addExistingItem(item) },
+                    enabled = !state.isAddingEntry,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (item.brand.isNullOrBlank()) item.name else "${item.name} (${item.brand})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp)
+                    )
+                }
+                HorizontalDivider()
+            }
+            if (!state.isSearchingAdd && results.isEmpty()) {
+                Text(
+                    "No matches",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+            TextButton(onClick = { viewModel.addPlaceholder() }, enabled = !state.isAddingPlaceholder) {
+                Text(if (state.isAddingPlaceholder) "Adding..." else "Add \"$trimmed\" as a placeholder")
+            }
+            TextButton(onClick = { viewModel.openAddItemFlow(searchUsda = true) }) {
+                Text("Search USDA for \"$trimmed\"")
+            }
+            TextButton(onClick = { viewModel.openAddItemFlow(searchUsda = false) }) {
+                Text("Create a new item")
+            }
         }
+    }
+}
+
+/** Full-screen host for the existing AddItemScreen, embedded the same
+ * way CreateRecipeScreen and MealDetailScreen already embed it: its own
+ * keyed ViewModel, reset when the flow ends so the next open starts
+ * fresh, and onUseCreatedItem for what to do with the item it makes.
+ * Never attached to a meal, so it only creates the item. */
+@Composable
+private fun AddItemFlowOverlay(
+    request: AddItemFlowRequest,
+    onUseItem: (Item) -> Unit,
+    onClose: () -> Unit
+) {
+    val addItemViewModel: AddItemViewModel = viewModel(key = "grocery_add_item")
+
+    LaunchedEffect(request) {
+        request.usdaQuery?.let { addItemViewModel.jumpToUsdaSearch(it) }
+    }
+
+    fun finish() {
+        addItemViewModel.resetToScanChoice()
+        onClose()
+    }
+
+    BackHandler { finish() }
+
+    Surface(modifier = Modifier.fillMaxSize()) {
+        AddItemScreen(
+            viewModel = addItemViewModel,
+            savedScreenPromptText = "Want to add it to your grocery list?",
+            savedScreenActionLabel = "Add to grocery list",
+            onUseCreatedItem = onUseItem,
+            onBack = { finish() },
+            onDone = { finish() }
+        )
     }
 }
 

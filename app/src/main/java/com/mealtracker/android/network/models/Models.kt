@@ -306,6 +306,14 @@ data class RecipeIngredientCreateRequest(
     val quantity: Double
 )
 
+/** A whole recipe used inside a saved meal -- quantity is a number of
+ * the recipe's servings, same as a recipe log's quantity. */
+@Serializable
+data class RecipeComponentCreateRequest(
+    @SerialName("component_recipe_id") val componentRecipeId: Int,
+    val quantity: Double
+)
+
 /**
  * Request body for POST /recipes. recipeType defaults to "recipe",
  * matching the backend's own RecipeBase default -- this must stay in
@@ -321,7 +329,8 @@ data class RecipeCreateRequest(
     val name: String,
     @SerialName("recipe_type") val recipeType: String = "recipe",
     val servings: Double = 1.0,
-    val ingredients: List<RecipeIngredientCreateRequest> = emptyList()
+    val ingredients: List<RecipeIngredientCreateRequest> = emptyList(),
+    val components: List<RecipeComponentCreateRequest> = emptyList()
 )
 
 /** Partial update for recipe metadata -- mirrors RecipeUpdate on the
@@ -420,6 +429,19 @@ data class ExtendedNutritionTotals(
 )
 
 @Serializable
+data class RecipeComponent(
+    @SerialName("component_recipe_id") val componentRecipeId: Int,
+    val quantity: String,
+    @SerialName("recipe_name") val recipeName: String,
+    @SerialName("image_path") val imagePath: String? = null,
+    val kcal: Int,
+    @SerialName("protein_g") val proteinG: Int,
+    @SerialName("carbs_g") val carbsG: Int,
+    @SerialName("fat_g") val fatG: Int,
+    @SerialName("fiber_g") val fiberG: Int
+)
+
+@Serializable
 data class RecipeDetail(
     @SerialName("recipe_id") val recipeId: Int,
     val name: String,
@@ -428,6 +450,7 @@ data class RecipeDetail(
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
     val ingredients: List<RecipeIngredient> = emptyList(),
+    val components: List<RecipeComponent> = emptyList(),
     val steps: List<RecipeStep> = emptyList(),
     val totals: ExtendedNutritionTotals,
     @SerialName("totals_per_serving") val totalsPerServing: ExtendedNutritionTotals

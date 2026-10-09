@@ -15,6 +15,7 @@ import com.mealtracker.android.network.models.LogFromMealRequest
 import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.LoggedRecipeIngredientOut
 import com.mealtracker.android.network.models.Recipe
+import com.mealtracker.android.network.models.RecipeComponentCreateRequest
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeDetail
 import com.mealtracker.android.network.models.RecipeIngredient
@@ -1964,13 +1965,24 @@ class MealDetailViewModel : ViewModel() {
             val quantity = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
             RecipeIngredientCreateRequest(itemId = itemId, servingSizeId = log.servingSizeId, quantity = quantity)
         }
+        val components = state.logs.mapNotNull { log ->
+            val recipeId = log.recipeId ?: return@mapNotNull null
+            val quantity = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
+            RecipeComponentCreateRequest(componentRecipeId = recipeId, quantity = quantity)
+        }
 
         _uiState.value = state.copy(isSavingMeal = true, saveMealError = null)
 
         viewModelScope.launch {
             try {
                 ApiClient.service.createRecipe(
-                    RecipeCreateRequest(name = name, recipeType = "meal", servings = 1.0, ingredients = ingredients)
+                    RecipeCreateRequest(
+                        name = name,
+                        recipeType = "meal",
+                        servings = 1.0,
+                        ingredients = ingredients,
+                        components = components
+                    )
                 )
                 _uiState.value = _uiState.value.copy(
                     isSavingMeal = false,

@@ -420,7 +420,7 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                         Spacer(modifier = Modifier.padding(top = 20.dp))
                         Text("Ingredients", style = MaterialTheme.typography.titleSmall)
                         Spacer(modifier = Modifier.padding(top = 4.dp))
-                        if (recipe.ingredients.isEmpty()) {
+                        if (recipe.ingredients.isEmpty() && recipe.components.isEmpty()) {
                             Text("No ingredients listed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else {
                             recipe.ingredients.forEach { ingredient ->
@@ -429,6 +429,16 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                     Text(
                                         "${ingredient.quantity.toDoubleOrNull()?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ingredient.quantity}" +
                                             (ingredient.servingSizeName?.let { " $it" } ?: "g"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            recipe.components.forEach { component ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(component.recipeName, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "${component.quantity.toDoubleOrNull()?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: component.quantity} serving(s) \u00b7 ${component.kcal} Cal",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
