@@ -128,10 +128,10 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
                 }
             )
 
-            // The opportunistic sync only runs on app cold start (see
-            // HealthConnectManager.syncToday) - this pushes the SAME
+            // The opportunistic sync only runs when the app comes to the
+            // foreground (see HealthConnectManager.syncRecentThrottled) - this pushes the SAME
             // full-history read on demand, for whenever you don't want
-            // to wait for the next cold start (e.g. right after editing
+            // to wait for the next foreground sync (e.g. right after editing
             // a reading in Libra and wanting the web chart to reflect
             // it immediately). Always a full replace either way, never
             // additive - see backend WeightHistoryEntry's docstring.
@@ -208,7 +208,7 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
             if (nutritionExportEnabled && hasNutritionPermission) {
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
                 Text(
-                    "Only meals visited after turning this on sync automatically. " +
+                    "The last 7 days sync automatically whenever you open the app. " +
                         "Use this to push everything you've ever logged, in one go.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -18,6 +18,8 @@ import com.mealtracker.android.ui.navigation.AppNavHost
 import com.mealtracker.android.ui.theme.MealTrackerTheme
 import com.mealtracker.android.ui.theme.ThemePreference
 import com.mealtracker.android.ui.theme.ThemePreferenceStore
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -25,18 +27,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Opportunistic: pushes today's meals to Health Connect on cold
-        // start so data logged before nutrition export was revisited on
-        // its own meal screen (see MealDetailScreen's LaunchedEffect)
-        // still shows up without waiting for that. syncToday() no-ops
-        // internally if export isn't enabled/permitted, and swallows
-        // its own errors here since this is opportunistic - the
-        // Settings "sync all past meals" button is the real fallback.
+        // Re-pushes the last week of meals every time the app comes to
+        // the foreground (throttled), so web edits show up in Health
+        // Connect soon after opening the app. No-ops if export isn't
+        // enabled/permitted; the Settings "sync all past meals" button
+        // covers anything older.
         lifecycleScope.launch {
-            try {
-                HealthConnectManager.syncToday(this@MainActivity)
-            } catch (e: Exception) {
-                // Ignore - opportunistic sync, manual sync in Settings covers recovery.
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                try {
+                    HealthConnectManager.syncRecentThrottled(this@MainActivity)
+                } catch (e: Exception) {
+                    // Opportunistic; manual sync in Settings covers recovery.
+                }
             }
         }
 

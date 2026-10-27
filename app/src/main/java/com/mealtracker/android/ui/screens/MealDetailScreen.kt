@@ -100,8 +100,6 @@ import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeDetail
 import com.mealtracker.android.network.models.RecipeIngredient
 import com.mealtracker.android.network.models.Log
-import com.mealtracker.android.health.HealthConnectManager
-import com.mealtracker.android.health.HealthConnectPreferences
 import com.mealtracker.android.ui.components.CatalogVisuals
 import com.mealtracker.android.ui.components.CreateServingDialog
 import com.mealtracker.android.ui.components.ItemQuantityDialog
@@ -204,67 +202,6 @@ fun MealDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val heroColor = MealVisuals.backgroundFor(mealType)
-    val healthConnectContext = androidx.compose.ui.platform.LocalContext.current
-
-    // Runs on ANY change to this meal's logs -- add, edit, or delete all
-    // naturally show up as a change to state.logs, so this is simpler
-    // and more robust than hooking into every individual mutation
-    // function (logItemQuickly, confirmLogItemQuantity, confirmRecipeLog,
-    // deleteLog, ...) separately. Per design discussion: sync unit is
-    // the MEAL (matching this app's own logging unit and Health
-    // Connect's own per-meal mealType field), not individual items --
-    // see HealthConnectManager.writeMealNutrition's doc comment for how
-    // the upsert-on-edit behavior works via clientRecordId/
-    // clientRecordVersion, with no Health Connect ID stored on our side
-    // at all.
-    //
-    // NOTE: previously sugar/saturated fat/sodium were left null here
-    // since Log didn't expose them at all -- now that the backend
-    // returns them (see design discussion), this syncs the full set
-    // NutritionRecord supports, not a partial picture.
-    LaunchedEffect(state.logs, state.isLoading, date, mealType) {
-        // Critical guard, not an optimization: state.logs defaults to
-        // emptyList() and isLoading defaults to true BEFORE the real
-        // network response arrives (see MealDetailUiState's defaults).
-        // Without this check, this effect fired on every single screen
-        // open with that placeholder empty list, indistinguishable from
-        // "this meal genuinely has nothing logged" -- which called
-        // deleteMealNutrition and wiped whatever was already synced for
-        // that day/meal, before the follow-up effect (once real data
-        // loaded) had a chance to write it back. If the screen was
-        // closed/navigated away before that second effect completed,
-        // the deletion was the only thing that actually took effect,
-        // permanently (see design discussion: "i'm not sure what
-        // triggers the push... and the one log we did have there is
-        // gone" -- this was why).
-        if (state.isLoading) return@LaunchedEffect
-        if (!HealthConnectPreferences.isNutritionExportEnabled(healthConnectContext)) return@LaunchedEffect
-        if (!HealthConnectManager.isAvailable(healthConnectContext)) return@LaunchedEffect
-        if (!HealthConnectManager.hasNutritionPermission(healthConnectContext)) return@LaunchedEffect
-
-        try {
-            if (state.logs.isEmpty()) {
-                HealthConnectManager.deleteMealNutrition(healthConnectContext, date, mealType)
-            } else {
-                val totals = HealthConnectManager.MealNutritionTotals(
-                    kcal = state.logs.sumOf { it.kcalLogged }.toDouble(),
-                    proteinG = state.logs.sumOf { it.proteinGLogged }.toDouble(),
-                    carbsG = state.logs.sumOf { it.carbsGLogged }.toDouble(),
-                    fatG = state.logs.sumOf { it.fatGLogged }.toDouble(),
-                    saturatedFatG = state.logs.sumOf { it.saturatedFatGLogged }.toDouble(),
-                    sugarG = state.logs.sumOf { it.sugarGLogged }.toDouble(),
-                    fiberG = state.logs.sumOf { it.fiberGLogged }.toDouble(),
-                    sodiumMg = state.logs.sumOf { it.sodiumMgLogged }.toDouble()
-                )
-                HealthConnectManager.writeMealNutrition(healthConnectContext, date, mealType, totals)
-            }
-        } catch (e: Exception) {
-            // Best-effort, same reasoning as every other Health Connect
-            // call in this app -- a sync hiccup shouldn't disrupt using
-            // the rest of the app, and there's no user-facing action to
-            // take on a background sync failure anyway.
-        }
-    }
 
     val scaffoldState = rememberBottomSheetScaffoldState()
     val coroutineScope = rememberCoroutineScope()

@@ -15,6 +15,10 @@ import androidx.health.connect.client.units.Mass
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.WeightHistoryEntryInRequest
 import com.mealtracker.android.network.models.WeightHistoryReplaceRequest
+import android.os.SystemClock
+import android.util.Log
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -250,6 +254,9 @@ object HealthConnectManager {
      * once all three are already true; startup sync needs to bail out
      * silently instead), so gating stays at the call site.
      *
+     * prune additionally deletes the record of every meal slot in the
+     * range that has no logs - only sensible for short ranges.
+     *
      * onProgress is called after each meal is written, with (completed,
      * total) - defaults to a no-op for callers (e.g. startup sync) that
      * don't display progress.
@@ -258,6 +265,7 @@ object HealthConnectManager {
         context: Context,
         startDate: LocalDate,
         endDate: LocalDate,
+        prune: Boolean = false,
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
     ): Int {
         val logs = ApiClient.service.getLogsInRange(
@@ -280,20 +288,21 @@ object HealthConnectManager {
             writeMealNutrition(context, LocalDate.parse(date), mealType, totals)
             onProgress(index + 1, byMeal.size)
         }
+        if (prune) {
+            // Meals deleted elsewhere (the web UI) leave their record
+            // behind; deleting by client id for every empty slot in the
+            // range is a no-op where nothing was ever written.
+            var day = startDate
+            while (!day.isAfter(endDate)) {
+                listOf("breakfast", "lunch", "dinner", "snack")
+                    .filter { (day.format(DateTimeFormatter.ISO_LOCAL_DATE) to it) !in byMeal }
+                    .forEach { deleteMealNutrition(context, day, it) }
+                day = day.plusDays(1)
+            }
+        }
         return byMeal.size
     }
 
-    /**
-     * Opportunistic app-startup sync: pushes only today's meals, and
-     * only if export is already fully set up. Silently no-ops otherwise
-     * (e.g. export disabled, permission not granted, Health Connect not
-     * installed) rather than surfacing anything at startup - the
-     * Settings backfill button remains the deliberate, visible fallback
-     * for anyone who needs to recover from a gap. Safe to call on every
-     * cold start: writeMealNutrition's clientRecordId/clientRecordVersion
-     * upsert means re-pushing unchanged data just replaces the existing
-     * record, not a duplicate.
-     */
     /**
      * Pushes the CURRENT FULL Health Connect weight history to the
      * backend as a wholesale replace (see backend WeightHistoryEntry's
@@ -324,35 +333,25 @@ object HealthConnectManager {
     }
 
     /**
-     * Opportunistic app-startup sync: pushes only today's meals, and
-     * only if export is already fully set up. Silently no-ops otherwise
-     * (e.g. export disabled, permission not granted, Health Connect not
-     * installed) rather than surfacing anything at startup - the
-     * Settings backfill button remains the deliberate, visible fallback
-     * for anyone who needs to recover from a gap. Safe to call on every
-     * cold start: writeMealNutrition's clientRecordId/clientRecordVersion
-     * upsert means re-pushing unchanged data just replaces the existing
-     * record, not a duplicate.
+     * Opportunistic app-startup sync: re-pushes the last [days] days
+     * through today (never future days: planned meals aren't eaten yet,
+     * and Health Connect treats whatever is written as consumed) and
+     * prunes records for meals that no longer exist, so edits and
+     * deletions made on the web show up too. Silently no-ops unless
+     * export is fully set up. Re-pushing unchanged data is harmless
+     * because the clientRecordId upsert replaces the existing record.
+     * The Settings backfill remains the way to push older history.
      *
-     * Also opportunistically syncs weight history the same way, gated
-     * on isWeightImportEnabled (see design discussion) rather than a
-     * new preference - weight IMPORT already has its own explicit
-     * on/off toggle, separate from Health Connect permission itself,
-     * and pushing our own already-permitted read up to our own backend
-     * is a natural extension of that same "weight import is on"
-     * decision, not a separate one needing its own toggle. Each half
-     * (nutrition, weight) fails independently - a Health Connect hiccup
-     * on one shouldn't block the other.
+     * Also syncs weight history, gated on isWeightImportEnabled. Each
+     * half fails independently so one can't block the other.
      */
-    suspend fun syncToday(context: Context) {
+    suspend fun syncRecent(context: Context, days: Int = 7) {
         if (HealthConnectPreferences.isNutritionExportEnabled(context) && isAvailable(context) && hasNutritionPermission(context)) {
             try {
                 val today = LocalDate.now()
-                syncLogsInRange(context, today, today)
+                syncLogsInRange(context, today.minusDays((days - 1).toLong()), today, prune = true)
             } catch (e: Exception) {
-                // Best-effort, same as this whole function's own
-                // "silently no-op" philosophy - and specifically must
-                // not prevent the weight sync below from running.
+                Log.w("HealthConnect", "Nutrition sync failed", e)
             }
         }
 
@@ -360,8 +359,26 @@ object HealthConnectManager {
             try {
                 syncWeightHistory(context)
             } catch (e: Exception) {
-                // Same reasoning as above, reversed.
+                Log.w("HealthConnect", "Weight sync failed", e)
             }
+        }
+    }
+
+    private val recentSyncMutex = Mutex()
+    private var lastRecentSyncAt = 0L
+
+    /**
+     * syncRecent for app-foreground triggers: skips if one completed in
+     * the last [minIntervalMillis] so switching back to the app
+     * repeatedly doesn't re-push every time. The timestamp is in memory
+     * only, so a cold start always syncs.
+     */
+    suspend fun syncRecentThrottled(context: Context, minIntervalMillis: Long = 10 * 60 * 1000L) {
+        recentSyncMutex.withLock {
+            val now = SystemClock.elapsedRealtime()
+            if (lastRecentSyncAt != 0L && now - lastRecentSyncAt < minIntervalMillis) return
+            syncRecent(context)
+            lastRecentSyncAt = SystemClock.elapsedRealtime()
         }
     }
 }
