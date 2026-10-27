@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -163,6 +164,37 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
         }
     }
 
+    var quantityEntry by remember { mutableStateOf<GroceryListEntry?>(null) }
+    var completingTrip by remember { mutableStateOf<GroceryTrip?>(null) }
+
+    quantityEntry?.let { entry ->
+        QuantityDialog(
+            itemName = entry.itemName,
+            initial = entry.quantity.orEmpty(),
+            onSave = { value ->
+                viewModel.updateEntryQuantity(entry.id, value.trim().ifBlank { null })
+                quantityEntry = null
+            },
+            onDismiss = { quantityEntry = null }
+        )
+    }
+
+    completingTrip?.let { trip ->
+        val count = state.entries.count { it.tripId == trip.id }
+        AlertDialog(
+            onDismissRequest = { completingTrip = null },
+            title = { Text("Complete this trip?") },
+            text = { Text("Everything planned for it ($count items) is treated as bought and removed from the list.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.completeTrip(trip.id)
+                    completingTrip = null
+                }) { Text("Complete") }
+            },
+            dismissButton = { TextButton(onClick = { completingTrip = null }) { Text("Cancel") } }
+        )
+    }
+
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Spacer(modifier = Modifier.height(12.dp))
@@ -196,7 +228,8 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
                     entry = entry,
                     onClick = { viewModel.openMoveSheet(entry.id) },
                     onDelete = { viewModel.deleteEntry(entry.id) },
-                    onResolveClick = { viewModel.openResolveSearch(entry.id) }
+                    onResolveClick = { viewModel.openResolveSearch(entry.id) },
+                    onQuantityClick = { quantityEntry = entry }
                 )
             }
         }
@@ -235,8 +268,13 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            IconButton(onClick = { viewModel.deleteTrip(trip.id) }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Delete trip")
+                            Row {
+                                IconButton(onClick = { completingTrip = trip }) {
+                                    Icon(Icons.Filled.Check, contentDescription = "Complete trip")
+                                }
+                                IconButton(onClick = { viewModel.deleteTrip(trip.id) }) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Delete trip (items return to the list)")
+                                }
                             }
                         }
                         if (tripEntries.isEmpty()) {
@@ -253,7 +291,8 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
                                         entry = entry,
                                         onClick = { viewModel.openMoveSheet(entry.id) },
                                         onDelete = { viewModel.deleteEntry(entry.id) },
-                                        onResolveClick = { viewModel.openResolveSearch(entry.id) }
+                                        onResolveClick = { viewModel.openResolveSearch(entry.id) },
+                                        onQuantityClick = { quantityEntry = entry }
                                     )
                                 }
                             }
@@ -271,7 +310,8 @@ private fun GroceryEntryRow(
     entry: GroceryListEntry,
     onClick: () -> Unit,
     onDelete: () -> Unit,
-    onResolveClick: () -> Unit
+    onResolveClick: () -> Unit,
+    onQuantityClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp)) {
         Row(
@@ -281,9 +321,14 @@ private fun GroceryEntryRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(entry.itemName, style = MaterialTheme.typography.bodyMedium)
-                if (!entry.quantity.isNullOrBlank()) {
-                    Text(entry.quantity, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                // Always tappable: shows the quantity, or a hint to add one.
+                val hasQuantity = !entry.quantity.isNullOrBlank()
+                Text(
+                    if (hasQuantity) entry.quantity!! else "Add quantity",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (hasQuantity) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClick = onQuantityClick).padding(vertical = 4.dp)
+                )
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Filled.Close, contentDescription = "Remove")
@@ -305,6 +350,32 @@ private fun GroceryEntryRow(
         }
         HorizontalDivider(modifier = Modifier.padding(top = 6.dp))
     }
+}
+
+/** Quantity is free text ("2 dozen", "a bag", "500g"), same as on the web. */
+@Composable
+private fun QuantityDialog(
+    itemName: String,
+    initial: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var value by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Quantity for $itemName") },
+        text = {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { value = it },
+                placeholder = { Text("e.g. 2 dozen, a bag, 500g") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = { TextButton(onClick = { onSave(value) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 /** Search-first add field (see design discussion): type to search your

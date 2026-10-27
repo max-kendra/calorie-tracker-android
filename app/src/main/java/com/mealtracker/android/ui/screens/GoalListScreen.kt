@@ -168,7 +168,7 @@ private fun GoalRow(goal: Goal, onClick: () -> Unit, onDeleteClick: () -> Unit) 
             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                 Text("${goal.startDate} - ${goal.endDate ?: "Ongoing"}", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "${goal.kcalTarget} Cal",
+                    "${goal.kcalTarget.toDoubleOrNull()?.let { Math.round(it) } ?: goal.kcalTarget} Cal",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

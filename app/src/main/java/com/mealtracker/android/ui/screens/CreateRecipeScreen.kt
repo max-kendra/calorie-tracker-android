@@ -66,8 +66,10 @@ import kotlin.math.roundToInt
 @Composable
 fun CreateRecipeContent(
     viewModel: CreateRecipeViewModel = viewModel(),
-    lastLoggedAmounts: Map<Int, LoggedAmount>,
-    onLogToMeal: (Recipe) -> Unit,
+    // Defaults let this run outside a meal (global "New recipe" button):
+    // no last-logged amounts to prefill from, and no "log to meal" action.
+    lastLoggedAmounts: Map<Int, LoggedAmount> = emptyMap(),
+    onLogToMeal: ((Recipe) -> Unit)? = null,
     onDone: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -75,7 +77,7 @@ fun CreateRecipeContent(
     if (state.createdRecipe != null) {
         RecipeCreatedContent(
             recipe = state.createdRecipe!!,
-            onLogToMeal = { onLogToMeal(state.createdRecipe!!) },
+            onLogToMeal = onLogToMeal?.let { log -> { log(state.createdRecipe!!) } },
             onDone = onDone
         )
         return
@@ -519,19 +521,25 @@ private fun IngredientMethodChip(
 }
 
 @Composable
-private fun RecipeCreatedContent(recipe: Recipe, onLogToMeal: () -> Unit, onDone: () -> Unit) {
+private fun RecipeCreatedContent(recipe: Recipe, onLogToMeal: (() -> Unit)?, onDone: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("\u2705 \"${recipe.name}\" saved", style = MaterialTheme.typography.titleMedium)
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-        Button(onClick = onLogToMeal, modifier = Modifier.fillMaxWidth()) {
-            Text("Log to this meal")
-        }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-        TextButton(onClick = onDone) {
-            Text("Done")
+        if (onLogToMeal != null) {
+            Button(onClick = onLogToMeal, modifier = Modifier.fillMaxWidth()) {
+                Text("Log to this meal")
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+            TextButton(onClick = onDone) {
+                Text("Done")
+            }
+        } else {
+            Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
+                Text("Done")
+            }
         }
     }
 }

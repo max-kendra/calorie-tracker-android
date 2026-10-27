@@ -376,6 +376,22 @@ class GroceryListViewModel : ViewModel() {
         }
     }
 
+    /** Everything in the trip counts as bought: the backend deletes the
+     * trip and its entries, so both are dropped locally too. */
+    fun completeTrip(tripId: Int) {
+        viewModelScope.launch {
+            try {
+                ApiClient.service.completeGroceryTrip(tripId)
+                _uiState.value = _uiState.value.copy(
+                    trips = _uiState.value.trips.filter { it.id != tripId },
+                    entries = _uiState.value.entries.filter { it.tripId != tripId }
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(actionError = e.message ?: "Couldn't complete this trip")
+            }
+        }
+    }
+
     // --- Inline "+ new store" (same pattern as the item edit dialog) ---
 
     fun updateNewStoreName(value: String) {

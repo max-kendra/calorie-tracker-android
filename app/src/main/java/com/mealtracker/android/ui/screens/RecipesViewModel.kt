@@ -46,6 +46,7 @@ data class RecipesUiState(
     val isEditing: Boolean = false,
     val editName: String = "",
     val editSourceUrl: String = "",
+    val editFullIngredients: String = "",
     val editServings: String = "1",
     val isSaving: Boolean = false,
     val saveError: String? = null,
@@ -150,6 +151,7 @@ class RecipesViewModel : ViewModel() {
             isEditing = true,
             editName = detail.name,
             editSourceUrl = detail.sourceUrl ?: "",
+            editFullIngredients = detail.fullIngredients ?: "",
             editServings = detail.servings,
             saveError = null
         )
@@ -161,6 +163,7 @@ class RecipesViewModel : ViewModel() {
 
     fun updateEditName(value: String) { _uiState.value = _uiState.value.copy(editName = value) }
     fun updateEditSourceUrl(value: String) { _uiState.value = _uiState.value.copy(editSourceUrl = value) }
+    fun updateEditFullIngredients(value: String) { _uiState.value = _uiState.value.copy(editFullIngredients = value) }
     // Digits only -- same reasoning as CreateRecipeViewModel.updateServings:
     // a recipe's own yield count is a whole number, unlike a logged
     // quantity of servings of it (which can be fractional).
@@ -188,7 +191,8 @@ class RecipesViewModel : ViewModel() {
                     RecipeUpdateRequest(
                         name = name,
                         sourceUrl = state.editSourceUrl.trim().ifEmpty { null },
-                        servings = servings
+                        servings = servings,
+                        fullIngredients = state.editFullIngredients.trim()
                     )
                 )
                 _uiState.value = _uiState.value.copy(isSaving = false, isEditing = false, recipeDetail = updated)

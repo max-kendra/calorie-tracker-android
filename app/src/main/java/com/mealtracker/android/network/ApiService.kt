@@ -278,6 +278,10 @@ interface ApiService {
     @DELETE("grocery-lists/trips/{tripId}")
     suspend fun deleteGroceryTrip(@Path("tripId") tripId: Int)
 
+    // Marks a trip complete: the backend removes the trip AND its entries.
+    @POST("grocery-lists/trips/{tripId}/complete")
+    suspend fun completeGroceryTrip(@Path("tripId") tripId: Int)
+
     @GET("grocery-lists/entries")
     suspend fun getGroceryEntries(): List<GroceryListEntry>
 

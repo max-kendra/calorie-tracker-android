@@ -277,7 +277,11 @@ class AddItemViewModel : ViewModel() {
     }
 
     fun resetToScanChoice() {
-        _uiState.value = AddItemUiState()
+        // Keep the already-loaded store list and refresh it: a blank state
+        // has none, and stores are otherwise only fetched in init, so every
+        // item after the first used to get an empty "Grocery stores" section.
+        _uiState.value = AddItemUiState(groceryStores = _uiState.value.groceryStores)
+        loadGroceryStores()
     }
 
     /** Matched an existing item via barcode (BARCODE_RESULT phase) -

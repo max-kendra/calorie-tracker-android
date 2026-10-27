@@ -342,7 +342,9 @@ data class RecipeUpdateRequest(
     val name: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
     val servings: Double? = null,
-    @SerialName("image_path") val imagePath: String? = null
+    @SerialName("image_path") val imagePath: String? = null,
+    // Free text; an empty string clears it.
+    @SerialName("full_ingredients") val fullIngredients: String? = null
 )
 
 /** Mirrors RecipeOut from app/schemas.py. recipeType distinguishes an
@@ -449,6 +451,7 @@ data class RecipeDetail(
     @SerialName("source_url") val sourceUrl: String? = null,
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
+    @SerialName("full_ingredients") val fullIngredients: String? = null,
     val ingredients: List<RecipeIngredient> = emptyList(),
     val components: List<RecipeComponent> = emptyList(),
     val steps: List<RecipeStep> = emptyList(),

@@ -48,6 +48,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.mealtracker.android.ui.components.PageIndicator
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -922,6 +925,14 @@ private fun CaptureLabelContent(
     }
 }
 
+private const val ITEM_FORM_PAGE_COUNT = 3
+
+/**
+ * The new-item form as a swipeable carousel: Basics, Nutrition, Stores.
+ * Every page reads and writes the same ViewModel state, so nothing is lost
+ * when swiping back and forth. Save lives on the last page; a blank name
+ * jumps back to the first page, where it can be fixed.
+ */
 @Composable
 private fun ItemFormContent(
     state: AddItemUiState,
@@ -929,247 +940,299 @@ private fun ItemFormContent(
     viewModel: AddItemViewModel,
     onAddPhoto: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-    ) {
-        // Lets the user attach/replace a photo directly here -- items
-        // that skip the usual capture steps (USDA imports currently)
-        // otherwise had no way to add one at all. Same crop pipeline as
-        // everywhere else (see AddItemScreen's galleryPickerForFormPhoto).
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Box(
+    val pagerState = rememberPagerState(pageCount = { ITEM_FORM_PAGE_COUNT })
+    val scope = rememberCoroutineScope()
+    val isLastPage = pagerState.currentPage == ITEM_FORM_PAGE_COUNT - 1
+    val pageTitles = listOf("Basics", "Nutrition", "Stores")
+
+    LaunchedEffect(state.saveError) {
+        if (state.saveError != null && state.name.isBlank()) pagerState.animateScrollToPage(0)
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            pageTitles[pagerState.currentPage],
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp)
+        )
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f).fillMaxWidth()
+        ) { page ->
+            Column(
                 modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable(onClick = onAddPhoto),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp)
             ) {
-                if (state.productImagePath != null) {
-                    coil3.compose.AsyncImage(
-                        model = com.mealtracker.android.BuildConfig.BASE_URL + state.productImagePath,
-                        contentDescription = null,
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(Icons.Filled.AddAPhoto, contentDescription = "Add photo")
+                when (page) {
+                    0 -> {
+                        // Lets the user attach/replace a photo directly here -- items
+                        // that skip the usual capture steps (USDA imports currently)
+                        // otherwise had no way to add one at all. Same crop pipeline as
+                        // everywhere else (see AddItemScreen's galleryPickerForFormPhoto).
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable(onClick = onAddPhoto),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (state.productImagePath != null) {
+                                    coil3.compose.AsyncImage(
+                                        model = com.mealtracker.android.BuildConfig.BASE_URL + state.productImagePath,
+                                        contentDescription = null,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(Icons.Filled.AddAPhoto, contentDescription = "Add photo")
+                                }
+                            }
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 12.dp))
+                            TextButton(onClick = onAddPhoto) {
+                                Text(if (state.productImagePath != null) "Change Photo" else "Add Photo")
+                            }
+                        }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                        if (state.ocrWasUsed) {
+                            if (!state.ocrPer100gConfirmed) {
+                                Text(
+                                    "\u26a0\ufe0f Couldn't confirm these values are per 100g -- " +
+                                        "double-check against the label and adjust \"Values are per\" below if needed.",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            if (state.ocrDetectedLanguage != null) {
+                                Text(
+                                    "Detected label language: ${state.ocrDetectedLanguage}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                "Review the extracted values below -- OCR isn't perfect.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            // Retaking used to only be reachable via the OCR-failure
+                            // dialog, which only shows on a COMPLETE failure -- a
+                            // partial/wrong-but-nonzero result had no way back to try
+                            // again short of restarting the whole flow (see design
+                            // discussion). Available here any time OCR was used at all.
+                            TextButton(onClick = { viewModel.retakeLabelPhoto() }) {
+                                Text("Retake Label Photo")
+                            }
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+                        }
+
+                        OutlinedTextField(
+                            value = state.name,
+                            onValueChange = viewModel::updateName,
+                            label = { Text("Name") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        // Brand/barcode don't apply to raw ingredients (a banana isn't
+                        // "branded" and doesn't have its own barcode) -- hidden rather
+                        // than just left empty, per design discussion.
+                        if (state.itemType != "ingredient") {
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+                            OutlinedTextField(
+                                value = state.brand,
+                                onValueChange = viewModel::updateBrand,
+                                label = { Text("Brand (optional)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+                            OutlinedTextField(
+                                value = state.barcode,
+                                onValueChange = viewModel::updateBarcode,
+                                label = { Text("Barcode") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = state.itemType == "product",
+                                onClick = { viewModel.updateItemType("product") },
+                                label = { Text("Product") },
+                                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                            FilterChip(
+                                selected = state.itemType == "ingredient",
+                                onClick = { viewModel.updateItemType("ingredient") },
+                                label = { Text("Ingredient") },
+                                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
+                    1 -> {
+                        // Editable now -- not every label reports macros per 100g (see
+                        // design discussion), so the amount these values are entered
+                        // for needs to be something the user can correct, not a fixed
+                        // "Per 100g" label. Converted to true per-100g at save time
+                        // (see AddItemViewModel.saveItem) regardless of what's typed
+                        // here.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Values are per", style = MaterialTheme.typography.titleSmall)
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                            OutlinedTextField(
+                                value = state.perAmountG,
+                                onValueChange = viewModel::updatePerAmountG,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                modifier = Modifier.width(90.dp)
+                            )
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                            Text("g", style = MaterialTheme.typography.titleSmall)
+                        }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+
+                        NumberField("Calories (kcal)", state.kcal100g, viewModel::updateKcal)
+                        NumberField("Fat (g)", state.fat100g, viewModel::updateFat)
+                        NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
+                        NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
+                        NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                        // Plain Yes/No toggle, set manually at creation - no more
+                        // "Auto" guess (see AddItemUiState.countsAsAddedSugar's doc
+                        // comment for why the old origin-based heuristic was dropped:
+                        // "product means it has a barcode, which frozen berries do",
+                        // so there was never a reliable field to guess this from).
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = viewModel::toggleCountsAsAddedSugar)
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Counts as added sugar",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                if (state.countsAsAddedSugar) "Yes" else "No",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            "Whether this item's sugar counts toward added-sugar tracking - e.g. yes for candy or soda, no for plain fruit, dairy, or other whole foods.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
+                        NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
+                        NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt, isLast = true)
+                    }
+                    else -> {
+                        // Genuinely after every macro field now, not sandwiched
+                        // between Sugar and Fiber (see design discussion / bug
+                        // report) - it was originally inserted right after the
+                        // added-sugar toggle without checking what field actually
+                        // came next in the form.
+                        Text("Grocery stores", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Which stores carry this item - the same product/brand can be sold in more than one, so pick as many as apply.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                        state.groceryStores.forEach { store ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(onClick = { viewModel.toggleGroceryStore(store.id) }),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = state.selectedGroceryStoreIds.contains(store.id),
+                                    onCheckedChange = { viewModel.toggleGroceryStore(store.id) }
+                                )
+                                Text(store.name, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        if (state.groceryStoresError != null) {
+                            Text(state.groceryStoresError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                            OutlinedTextField(
+                                value = state.newStoreNameInput,
+                                onValueChange = viewModel::updateNewStoreName,
+                                label = { Text("New store name") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                            androidx.compose.material3.TextButton(
+                                onClick = viewModel::createGroceryStore,
+                                enabled = !state.isCreatingStore && state.newStoreNameInput.isNotBlank()
+                            ) {
+                                Text(if (state.isCreatingStore) "Adding..." else "Add")
+                            }
+                        }
+                    }
                 }
             }
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 12.dp))
-            TextButton(onClick = onAddPhoto) {
-                Text(if (state.productImagePath != null) "Change Photo" else "Add Photo")
-            }
-        }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-
-        if (state.ocrWasUsed) {
-            if (!state.ocrPer100gConfirmed) {
-                Text(
-                    "\u26a0\ufe0f Couldn't confirm these values are per 100g -- " +
-                        "double-check against the label and adjust \"Values are per\" below if needed.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (state.ocrDetectedLanguage != null) {
-                Text(
-                    "Detected label language: ${state.ocrDetectedLanguage}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                "Review the extracted values below -- OCR isn't perfect.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            // Retaking used to only be reachable via the OCR-failure
-            // dialog, which only shows on a COMPLETE failure -- a
-            // partial/wrong-but-nonzero result had no way back to try
-            // again short of restarting the whole flow (see design
-            // discussion). Available here any time OCR was used at all.
-            TextButton(onClick = { viewModel.retakeLabelPhoto() }) {
-                Text("Retake Label Photo")
-            }
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
         }
 
-        OutlinedTextField(
-            value = state.name,
-            onValueChange = viewModel::updateName,
-            label = { Text("Name") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        // Brand/barcode don't apply to raw ingredients (a banana isn't
-        // "branded" and doesn't have its own barcode) -- hidden rather
-        // than just left empty, per design discussion.
-        if (state.itemType != "ingredient") {
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-            OutlinedTextField(
-                value = state.brand,
-                onValueChange = viewModel::updateBrand,
-                label = { Text("Brand (optional)") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-            OutlinedTextField(
-                value = state.barcode,
-                onValueChange = viewModel::updateBarcode,
-                label = { Text("Barcode") },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = state.itemType == "product",
-                onClick = { viewModel.updateItemType("product") },
-                label = { Text("Product") },
-                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            )
-            FilterChip(
-                selected = state.itemType == "ingredient",
-                onClick = { viewModel.updateItemType("ingredient") },
-                label = { Text("Ingredient") },
-                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            )
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        // Editable now -- not every label reports macros per 100g (see
-        // design discussion), so the amount these values are entered
-        // for needs to be something the user can correct, not a fixed
-        // "Per 100g" label. Converted to true per-100g at save time
-        // (see AddItemViewModel.saveItem) regardless of what's typed
-        // here.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Values are per", style = MaterialTheme.typography.titleSmall)
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
-            OutlinedTextField(
-                value = state.perAmountG,
-                onValueChange = viewModel::updatePerAmountG,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                modifier = Modifier.width(90.dp)
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
-            Text("g", style = MaterialTheme.typography.titleSmall)
-        }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-
-        NumberField("Calories (kcal)", state.kcal100g, viewModel::updateKcal)
-        NumberField("Fat (g)", state.fat100g, viewModel::updateFat)
-        NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
-        NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
-        NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-        // Plain Yes/No toggle, set manually at creation - no more
-        // "Auto" guess (see AddItemUiState.countsAsAddedSugar's doc
-        // comment for why the old origin-based heuristic was dropped:
-        // "product means it has a barcode, which frozen berries do",
-        // so there was never a reliable field to guess this from).
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = viewModel::toggleCountsAsAddedSugar)
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                "Counts as added sugar",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                if (state.countsAsAddedSugar) "Yes" else "No",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-        Text(
-            "Whether this item's sugar counts toward added-sugar tracking - e.g. yes for candy or soda, no for plain fruit, dairy, or other whole foods.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
-        NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
-        NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt, isLast = true)
-
-        // Genuinely after every macro field now, not sandwiched
-        // between Sugar and Fiber (see design discussion / bug
-        // report) - it was originally inserted right after the
-        // added-sugar toggle without checking what field actually
-        // came next in the form.
-        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        Text("Grocery stores", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "Which stores carry this item - the same product/brand can be sold in more than one, so pick as many as apply.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-        state.groceryStores.forEach { store ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = { viewModel.toggleGroceryStore(store.id) }),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = state.selectedGroceryStoreIds.contains(store.id),
-                    onCheckedChange = { viewModel.toggleGroceryStore(store.id) }
-                )
-                Text(store.name, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        if (state.groceryStoresError != null) {
-            Text(state.groceryStoresError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-            OutlinedTextField(
-                value = state.newStoreNameInput,
-                onValueChange = viewModel::updateNewStoreName,
-                label = { Text("New store name") },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
-            androidx.compose.material3.TextButton(
-                onClick = viewModel::createGroceryStore,
-                enabled = !state.isCreatingStore && state.newStoreNameInput.isNotBlank()
-            ) {
-                Text(if (state.isCreatingStore) "Adding..." else "Add")
-            }
-        }
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
-
-        Button(
-            onClick = { viewModel.saveItem() },
-            enabled = !isSaving,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (isSaving) "Saving..." else "Save Item")
-        }
         if (state.saveError != null) {
             Text(
                 state.saveError,
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp)
             )
+        }
+
+        PageIndicator(pageCount = ITEM_FORM_PAGE_COUNT, currentPage = pagerState.currentPage)
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
+                enabled = pagerState.currentPage > 0
+            ) {
+                Text("Back")
+            }
+            Button(
+                onClick = {
+                    if (isLastPage) {
+                        viewModel.saveItem()
+                    } else {
+                        scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                    }
+                },
+                enabled = !isSaving,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    when {
+                        isSaving -> "Saving..."
+                        isLastPage -> "Save Item"
+                        else -> "Next"
+                    }
+                )
+            }
         }
     }
 }

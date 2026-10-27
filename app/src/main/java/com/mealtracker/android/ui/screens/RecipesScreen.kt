@@ -64,6 +64,8 @@ import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.ui.components.CatalogVisuals
 import com.mealtracker.android.ui.components.CropDialog
+import com.mealtracker.android.ui.components.TimerPicker
+import com.mealtracker.android.ui.components.formatTimer
 import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -357,6 +359,14 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            Spacer(modifier = Modifier.padding(top = 8.dp))
+                            OutlinedTextField(
+                                value = state.editFullIngredients,
+                                onValueChange = { viewModel.updateEditFullIngredients(it) },
+                                label = { Text("Full ingredient list (optional)") },
+                                minLines = 4,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                             if (state.saveError != null) {
                                 Text(state.saveError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                             }
@@ -445,6 +455,12 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                 }
                             }
                         }
+                        if (!state.isEditing && !recipe.fullIngredients.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.padding(top = 20.dp))
+                            Text("Full ingredient list", style = MaterialTheme.typography.titleSmall)
+                            Spacer(modifier = Modifier.padding(top = 4.dp))
+                            Text(recipe.fullIngredients, style = MaterialTheme.typography.bodyMedium)
+                        }
                         Spacer(modifier = Modifier.padding(top = 20.dp))
                         Text("Steps", style = MaterialTheme.typography.titleSmall)
                         Spacer(modifier = Modifier.padding(top = 4.dp))
@@ -461,16 +477,11 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     Spacer(modifier = Modifier.padding(top = 4.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        OutlinedTextField(
-                                            value = state.editStepTimerInput,
-                                            onValueChange = { viewModel.updateEditStepTimerInput(it) },
-                                            label = { Text("Timer (seconds, optional)") },
-                                            singleLine = true,
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
+                                    TimerPicker(
+                                        seconds = state.editStepTimerInput.toIntOrNull(),
+                                        onChange = { viewModel.updateEditStepTimerInput(it?.toString() ?: "") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                     Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Button(onClick = { viewModel.saveEditingStep() }, enabled = !state.isSavingStep) {
                                             Text(if (state.isSavingStep) "Saving..." else "Save")
@@ -494,7 +505,7 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                         Text("${step.stepNumber}. ${step.text}", style = MaterialTheme.typography.bodyMedium)
                                         if (step.timerSeconds != null) {
                                             Text(
-                                                "${step.timerSeconds}s timer",
+                                                "${formatTimer(step.timerSeconds)} timer",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -525,12 +536,9 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                 )
                                 Spacer(modifier = Modifier.padding(top = 4.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedTextField(
-                                        value = state.newStepTimerInput,
-                                        onValueChange = { viewModel.updateNewStepTimerInput(it) },
-                                        label = { Text("Timer (seconds, optional)") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    TimerPicker(
+                                        seconds = state.newStepTimerInput.toIntOrNull(),
+                                        onChange = { viewModel.updateNewStepTimerInput(it?.toString() ?: "") },
                                         modifier = Modifier.weight(1f)
                                     )
                                     Spacer(modifier = Modifier.padding(start = 8.dp))

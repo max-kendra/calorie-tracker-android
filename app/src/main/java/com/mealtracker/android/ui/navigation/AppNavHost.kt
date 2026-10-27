@@ -9,12 +9,16 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -25,6 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Modifier
@@ -42,6 +49,8 @@ import androidx.navigation.navArgument
 import com.mealtracker.android.ui.screens.CalorieGoalScreen
 import com.mealtracker.android.ui.screens.EditProfileScreen
 import com.mealtracker.android.ui.screens.GoalEditFlowScreen
+import com.mealtracker.android.ui.screens.GlobalCreateFlow
+import com.mealtracker.android.ui.screens.GlobalCreateOverlay
 import com.mealtracker.android.ui.screens.GoalListScreen
 import com.mealtracker.android.ui.screens.HealthConnectSettingsScreen
 import com.mealtracker.android.ui.screens.HomeScreen
@@ -95,6 +104,11 @@ private val routesWithoutBottomBar = setOf("gate", "onboarding", "meal_detail/{d
 // same as before.
 private val edgeToEdgeStatusBarRoutes = setOf("journal", "meal_detail/{date}/{mealType}")
 
+// Routes that show the global "create new item / recipe" button. Grocery
+// List has its own button (new trip) and creates items from its own
+// search field, so it is left out.
+private val routesWithCreateButton = setOf("home", "journal", "recipes")
+
 @Composable
 fun AppNavHost(
     themePreference: ThemePreference,
@@ -103,201 +117,234 @@ fun AppNavHost(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    var createMenuOpen by remember { mutableStateOf(false) }
+    var createFlow by remember { mutableStateOf<GlobalCreateFlow?>(null) }
 
-    Scaffold(
-        // Everywhere EXCEPT edgeToEdgeStatusBarRoutes still gets a
-        // status-bar-safe top inset -- just applied explicitly below via
-        // statusBarsPadding() instead of Scaffold's default, so the
-        // routes that want their own hero to bleed up behind the status
-        // bar (see that set's doc comment) can opt out of it.
-        contentWindowInsets = WindowInsets.safeDrawing.exclude(WindowInsets.statusBars),
-        bottomBar = {
-            if (currentRoute !in routesWithoutBottomBar) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    val currentDestination = navBackStackEntry?.destination
-
-                    bottomNavDestinations.forEach { destination ->
-                        NavigationBarItem(
-                            icon = {
-                                // ShoppingCart's glyph sits visually
-                                // higher than the other four icons'
-                                // more symmetric shapes within the same
-                                // bounding box (a cart's handle extends
-                                // up, its body extends down) - a small
-                                // manual nudge down, not a layout issue
-                                // shared code could fix.
-                                val iconOffset = if (destination == Destination.GroceryList) 2.dp else 0.dp
-                                Icon(
-                                    destination.icon,
-                                    contentDescription = destination.label,
-                                    modifier = Modifier.offset(y = iconOffset)
-                                )
-                            },
-                            label = { Text(destination.label) },
-                            selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
-                            // Without this, the selected-tab indicator pill
-                            // falls back to Material3's own unset default
-                            // (secondaryContainer), which is a baseline
-                            // purple neither of our color schemes ever set
-                            // explicitly -- same stock color the app icon
-                            // had before it was fixed (see design
-                            // discussion: "the little accents on the
-                            // navbar when you select a page, those are
-                            // still purple, can we try to make them match
-                            // the journal hero page"). primaryContainer
-                            // already IS that exact pastel-blue/navy pair.
-                            colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            onClick = {
-                                navController.navigate(destination.route) {
-                                    // Standard bottom-nav behavior: avoid piling up
-                                    // a huge back stack as the user bounces between
-                                    // tabs, and don't create duplicate copies of the
-                                    // same destination on repeated taps.
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            floatingActionButton = {
+                if (currentRoute in routesWithCreateButton) {
+                    Box {
+                        FloatingActionButton(onClick = { createMenuOpen = true }) {
+                            Icon(Icons.Filled.Add, contentDescription = "Create new")
+                        }
+                        DropdownMenu(expanded = createMenuOpen, onDismissRequest = { createMenuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("New item") },
+                                onClick = {
+                                    createMenuOpen = false
+                                    createFlow = GlobalCreateFlow.ITEM
                                 }
-                            }
-                        )
+                            )
+                            DropdownMenuItem(
+                                text = { Text("New recipe") },
+                                onClick = {
+                                    createMenuOpen = false
+                                    createFlow = GlobalCreateFlow.RECIPE
+                                }
+                            )
+                        }
                     }
+                }
+            },
+            // Everywhere EXCEPT edgeToEdgeStatusBarRoutes still gets a
+            // status-bar-safe top inset -- just applied explicitly below via
+            // statusBarsPadding() instead of Scaffold's default, so the
+            // routes that want their own hero to bleed up behind the status
+            // bar (see that set's doc comment) can opt out of it.
+            contentWindowInsets = WindowInsets.safeDrawing.exclude(WindowInsets.statusBars),
+            bottomBar = {
+                if (currentRoute !in routesWithoutBottomBar) {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                        val currentDestination = navBackStackEntry?.destination
+
+                        bottomNavDestinations.forEach { destination ->
+                            NavigationBarItem(
+                                icon = {
+                                    // ShoppingCart's glyph sits visually
+                                    // higher than the other four icons'
+                                    // more symmetric shapes within the same
+                                    // bounding box (a cart's handle extends
+                                    // up, its body extends down) - a small
+                                    // manual nudge down, not a layout issue
+                                    // shared code could fix.
+                                    val iconOffset = if (destination == Destination.GroceryList) 2.dp else 0.dp
+                                    Icon(
+                                        destination.icon,
+                                        contentDescription = destination.label,
+                                        modifier = Modifier.offset(y = iconOffset)
+                                    )
+                                },
+                                label = { Text(destination.label) },
+                                selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
+                                // Without this, the selected-tab indicator pill
+                                // falls back to Material3's own unset default
+                                // (secondaryContainer), which is a baseline
+                                // purple neither of our color schemes ever set
+                                // explicitly -- same stock color the app icon
+                                // had before it was fixed (see design
+                                // discussion: "the little accents on the
+                                // navbar when you select a page, those are
+                                // still purple, can we try to make them match
+                                // the journal hero page"). primaryContainer
+                                // already IS that exact pastel-blue/navy pair.
+                                colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                onClick = {
+                                    navController.navigate(destination.route) {
+                                        // Standard bottom-nav behavior: avoid piling up
+                                        // a huge back stack as the user bounces between
+                                        // tabs, and don't create duplicate copies of the
+                                        // same destination on repeated taps.
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = "gate",
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .let { base -> if (currentRoute in edgeToEdgeStatusBarRoutes) base else base.statusBarsPadding() }
+            ) {
+                composable("gate") {
+                    val gateViewModel: OnboardingGateViewModel = viewModel()
+                    val gateState by gateViewModel.uiState.collectAsState()
+
+                    LaunchedEffect(Unit) {
+                        gateViewModel.checkSetupComplete()
+                    }
+
+                    LaunchedEffect(gateState.needsOnboarding) {
+                        val needsOnboarding = gateState.needsOnboarding ?: return@LaunchedEffect
+                        val destination = if (needsOnboarding) "onboarding" else Destination.Home.route
+                        navController.navigate(destination) {
+                            popUpTo("gate") { inclusive = true }
+                        }
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                composable("onboarding") {
+                    OnboardingScreen(
+                        onComplete = {
+                            navController.navigate(Destination.Home.route) {
+                                popUpTo("onboarding") { inclusive = true }
+                            }
+                        }
+                    )
+                }
+                composable(Destination.Home.route) { HomeScreen() }
+                composable(Destination.Journal.route) {
+                    JournalScreen(
+                        onNavigateToMealDetail = { date, mealType ->
+                            navController.navigate("meal_detail/$date/$mealType")
+                        }
+                    )
+                }
+                composable("meal_detail/{date}/{mealType}") { backStackEntry ->
+                    val dateArg = backStackEntry.arguments?.getString("date") ?: java.time.LocalDate.now().toString()
+                    val mealTypeArg = backStackEntry.arguments?.getString("mealType") ?: "breakfast"
+                    MealDetailScreen(
+                        date = java.time.LocalDate.parse(dateArg),
+                        mealType = mealTypeArg,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                // "add_item" as its own standalone route is gone -- that
+                // flow (AddItemScreen) is now embedded directly inside
+                // MealDetailScreen's Add Item sheet instead of being
+                // navigated to (see design discussion: "we want it inside
+                // the card"). It was only ever reachable from there, so
+                // there's nothing else that needs this route.
+                composable(Destination.Recipes.route) { RecipesScreen() }
+                composable(Destination.GroceryList.route) { GroceryListScreen() }
+                composable(Destination.Profile.route) {
+                    ProfileScreen(
+                        onNavigateToSettings = { navController.navigate("profile_settings") }
+                    )
+                }
+                composable("profile_settings") {
+                    SettingsScreen(
+                        onBack = { navController.popBackStack() },
+                        onNavigateToEditProfile = { navController.navigate("profile_settings/edit") },
+                        onNavigateToCalorieGoal = { navController.navigate("profile_settings/calorie_goal") },
+                        onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
+                        onNavigateToMacronutrients = { navController.navigate("macronutrients") },
+                        onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") },
+                        onNavigateToEditGoals = { navController.navigate("goal_list") },
+                        onNavigateToHealthConnect = { navController.navigate("profile_settings/health_connect") },
+                        themePreference = themePreference,
+                        onThemePreferenceChange = onThemePreferenceChange
+                    )
+                }
+                // Goal List (see design discussion) - sits alongside the
+                // three existing quick-edit screens above, not replacing
+                // them. goal_edit's goalId arg is nullable: present when
+                // editing an existing goal, absent when creating a new one.
+                composable("goal_list") {
+                    GoalListScreen(
+                        onBack = { navController.popBackStack() },
+                        onEditGoal = { goalId -> navController.navigate("goal_edit?goalId=$goalId") },
+                        onNewGoal = { navController.navigate("goal_edit") }
+                    )
+                }
+                composable(
+                    "goal_edit?goalId={goalId}",
+                    arguments = listOf(navArgument("goalId") {
+                        type = NavType.IntType
+                        defaultValue = -1
+                    })
+                ) { backStackEntry ->
+                    val goalId = backStackEntry.arguments?.getInt("goalId") ?: -1
+                    GoalEditFlowScreen(
+                        goalId = if (goalId == -1) null else goalId,
+                        onDone = { navController.popBackStack() }
+                    )
+                }
+                composable("profile_settings/edit") {
+                    EditProfileScreen(onBack = { navController.popBackStack() })
+                }
+                composable("profile_settings/calorie_goal") {
+                    CalorieGoalScreen(onBack = { navController.popBackStack() })
+                }
+                composable("profile_settings/weight_goal") {
+                    WeightGoalScreen(onBack = { navController.popBackStack() })
+                }
+                composable("profile_settings/health_connect") {
+                    HealthConnectSettingsScreen(onBack = { navController.popBackStack() })
+                }
+                composable("macronutrients") {
+                    MacronutrientsScreen(
+                        onNavigateToProfile = { navController.popBackStack() },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("meal_calorie_goal") {
+                    MealCalorieGoalScreen(
+                        onNavigateToSetGoal = { navController.popBackStack() },
+                        onBack = { navController.popBackStack() }
+                    )
                 }
             }
         }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "gate",
-            modifier = Modifier
-                .padding(innerPadding)
-                .let { base -> if (currentRoute in edgeToEdgeStatusBarRoutes) base else base.statusBarsPadding() }
-        ) {
-            composable("gate") {
-                val gateViewModel: OnboardingGateViewModel = viewModel()
-                val gateState by gateViewModel.uiState.collectAsState()
 
-                LaunchedEffect(Unit) {
-                    gateViewModel.checkSetupComplete()
-                }
-
-                LaunchedEffect(gateState.needsOnboarding) {
-                    val needsOnboarding = gateState.needsOnboarding ?: return@LaunchedEffect
-                    val destination = if (needsOnboarding) "onboarding" else Destination.Home.route
-                    navController.navigate(destination) {
-                        popUpTo("gate") { inclusive = true }
-                    }
-                }
-
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
-            composable("onboarding") {
-                OnboardingScreen(
-                    onComplete = {
-                        navController.navigate(Destination.Home.route) {
-                            popUpTo("onboarding") { inclusive = true }
-                        }
-                    }
-                )
-            }
-            composable(Destination.Home.route) { HomeScreen() }
-            composable(Destination.Journal.route) {
-                JournalScreen(
-                    onNavigateToMealDetail = { date, mealType ->
-                        navController.navigate("meal_detail/$date/$mealType")
-                    }
-                )
-            }
-            composable("meal_detail/{date}/{mealType}") { backStackEntry ->
-                val dateArg = backStackEntry.arguments?.getString("date") ?: java.time.LocalDate.now().toString()
-                val mealTypeArg = backStackEntry.arguments?.getString("mealType") ?: "breakfast"
-                MealDetailScreen(
-                    date = java.time.LocalDate.parse(dateArg),
-                    mealType = mealTypeArg,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            // "add_item" as its own standalone route is gone -- that
-            // flow (AddItemScreen) is now embedded directly inside
-            // MealDetailScreen's Add Item sheet instead of being
-            // navigated to (see design discussion: "we want it inside
-            // the card"). It was only ever reachable from there, so
-            // there's nothing else that needs this route.
-            composable(Destination.Recipes.route) { RecipesScreen() }
-            composable(Destination.GroceryList.route) { GroceryListScreen() }
-            composable(Destination.Profile.route) {
-                ProfileScreen(
-                    onNavigateToSettings = { navController.navigate("profile_settings") }
-                )
-            }
-            composable("profile_settings") {
-                SettingsScreen(
-                    onBack = { navController.popBackStack() },
-                    onNavigateToEditProfile = { navController.navigate("profile_settings/edit") },
-                    onNavigateToCalorieGoal = { navController.navigate("profile_settings/calorie_goal") },
-                    onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
-                    onNavigateToMacronutrients = { navController.navigate("macronutrients") },
-                    onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") },
-                    onNavigateToEditGoals = { navController.navigate("goal_list") },
-                    onNavigateToHealthConnect = { navController.navigate("profile_settings/health_connect") },
-                    themePreference = themePreference,
-                    onThemePreferenceChange = onThemePreferenceChange
-                )
-            }
-            // Goal List (see design discussion) - sits alongside the
-            // three existing quick-edit screens above, not replacing
-            // them. goal_edit's goalId arg is nullable: present when
-            // editing an existing goal, absent when creating a new one.
-            composable("goal_list") {
-                GoalListScreen(
-                    onBack = { navController.popBackStack() },
-                    onEditGoal = { goalId -> navController.navigate("goal_edit?goalId=$goalId") },
-                    onNewGoal = { navController.navigate("goal_edit") }
-                )
-            }
-            composable(
-                "goal_edit?goalId={goalId}",
-                arguments = listOf(navArgument("goalId") {
-                    type = NavType.IntType
-                    defaultValue = -1
-                })
-            ) { backStackEntry ->
-                val goalId = backStackEntry.arguments?.getInt("goalId") ?: -1
-                GoalEditFlowScreen(
-                    goalId = if (goalId == -1) null else goalId,
-                    onDone = { navController.popBackStack() }
-                )
-            }
-            composable("profile_settings/edit") {
-                EditProfileScreen(onBack = { navController.popBackStack() })
-            }
-            composable("profile_settings/calorie_goal") {
-                CalorieGoalScreen(onBack = { navController.popBackStack() })
-            }
-            composable("profile_settings/weight_goal") {
-                WeightGoalScreen(onBack = { navController.popBackStack() })
-            }
-            composable("profile_settings/health_connect") {
-                HealthConnectSettingsScreen(onBack = { navController.popBackStack() })
-            }
-            composable("macronutrients") {
-                MacronutrientsScreen(
-                    onNavigateToProfile = { navController.popBackStack() },
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable("meal_calorie_goal") {
-                MealCalorieGoalScreen(
-                    onNavigateToSetGoal = { navController.popBackStack() },
-                    onBack = { navController.popBackStack() }
-                )
-            }
+        createFlow?.let { flow ->
+            GlobalCreateOverlay(flow = flow, onClose = { createFlow = null })
         }
     }
 }
