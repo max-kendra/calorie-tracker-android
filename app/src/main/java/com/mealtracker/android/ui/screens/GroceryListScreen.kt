@@ -35,7 +35,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,6 +50,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import com.mealtracker.android.network.models.GroceryListEntry
 import com.mealtracker.android.network.models.GroceryTrip
 import com.mealtracker.android.network.models.Item
@@ -73,33 +95,23 @@ fun GroceryListScreen(viewModel: GroceryListViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            floatingActionButton = {
-                FloatingActionButton(onClick = { viewModel.openNewTripSheet() }) {
-                    Icon(Icons.Filled.Add, contentDescription = "New trip")
+        when {
+            state.isLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
             }
-        ) { padding ->
-            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-                when {
-                    state.isLoading -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                    state.loadError != null -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(state.loadError!!, color = MaterialTheme.colorScheme.error)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(onClick = { viewModel.load() }) { Text("Retry") }
-                            }
-                        }
-                    }
-                    else -> {
-                        GroceryListContent(state = state, viewModel = viewModel)
+            state.loadError != null -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(state.loadError!!, color = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = { viewModel.load() }) { Text("Retry") }
                     }
                 }
+            }
+            else -> {
+                GroceryListContent(state = state, viewModel = viewModel)
             }
         }
         val addItemFlow = state.addItemFlow
@@ -147,23 +159,23 @@ fun GroceryListScreen(viewModel: GroceryListViewModel = viewModel()) {
     }
 }
 
-@Composable
-private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryListViewModel) {
-    val poolEntries = state.entries.filter { it.tripId == null }
-    // Grouped by store, same bucketing logic as the web app - a
-    // store-agnostic item (or a placeholder, which has no stores at
-    // all) lands in "Any store".
-    val poolByStore = linkedMapOf<String, Pair<String, MutableList<GroceryListEntry>>>()
-    for (entry in poolEntries) {
-        if (entry.groceryStores.isEmpty()) {
-            poolByStore.getOrPut("any") { "Any store" to mutableListOf() }.second.add(entry)
-        } else {
-            for (store in entry.groceryStores) {
-                poolByStore.getOrPut(store.id.toString()) { store.name to mutableListOf() }.second.add(entry)
-            }
-        }
+private val TRIP_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM")
+
+private fun tripDateLabel(date: String): String =
+    try {
+        LocalDate.parse(date).format(TRIP_DATE_FORMAT)
+    } catch (e: Exception) {
+        date
     }
 
+private fun tripTitle(trip: GroceryTrip): String = trip.label ?: tripDateLabel(trip.date)
+
+/** One list per pager page (page 0 = unplanned, then one page per trip,
+ * soonest first), with chips on top as both tabs and page indicator.
+ * The draggable card at the bottom adds to whichever list is showing. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryListViewModel) {
     var quantityEntry by remember { mutableStateOf<GroceryListEntry?>(null) }
     var completingTrip by remember { mutableStateOf<GroceryTrip?>(null) }
 
@@ -195,27 +207,154 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
         )
     }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        item {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("Not yet planned", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-            AddToListSection(state = state, viewModel = viewModel)
-            Spacer(modifier = Modifier.height(4.dp))
+    val sortedTrips = remember(state.trips) { state.trips.sortedBy { it.date } }
+    val pagerState = rememberPagerState(pageCount = { 1 + sortedTrips.size })
+    val scaffoldState = rememberBottomSheetScaffoldState()
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val expandedSheetMinHeight = LocalConfiguration.current.screenHeightDp.dp * 0.82f
+
+    val currentTrips by rememberUpdatedState(sortedTrips)
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage to currentTrips }.collect { (page, trips) ->
+            viewModel.selectList(trips.getOrNull(page - 1)?.id)
         }
-        if (poolByStore.isEmpty()) {
-            item {
+    }
+
+    LaunchedEffect(state.newlyCreatedTripId) {
+        val id = state.newlyCreatedTripId ?: return@LaunchedEffect
+        val index = sortedTrips.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            pagerState.animateScrollToPage(index + 1)
+            viewModel.consumeNewlyCreatedTrip()
+        }
+    }
+
+    // Collapse the add card once something lands, so the list is visible.
+    var knownEntryCount by remember { mutableStateOf(state.entries.size) }
+    LaunchedEffect(state.entries.size) {
+        if (state.entries.size > knownEntryCount) {
+            focusManager.clearFocus()
+            scaffoldState.bottomSheetState.partialExpand()
+        }
+        knownEntryCount = state.entries.size
+    }
+
+    val activeTrip = sortedTrips.getOrNull(pagerState.currentPage - 1)
+
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        sheetPeekHeight = 140.dp,
+        sheetContent = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = expandedSheetMinHeight)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+            ) {
                 Text(
-                    "Nothing here",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Add to ${activeTrip?.let { tripTitle(it) } ?: "Unplanned"}",
+                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp)
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                AddToListSection(
+                    state = state,
+                    viewModel = viewModel,
+                    onFieldFocused = { scope.launch { scaffoldState.bottomSheetState.expand() } }
                 )
             }
         }
-        poolByStore.forEach { (_, pair) ->
-            val (storeName, storeEntries) = pair
+    ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = pagerState.currentPage == 0,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                            label = { Text("Unplanned (${state.entries.count { it.tripId == null }})") }
+                        )
+                    }
+                    itemsIndexed(sortedTrips, key = { _, trip -> trip.id }) { index, trip ->
+                        FilterChip(
+                            selected = pagerState.currentPage == index + 1,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(index + 1) } },
+                            label = { Text("${tripTitle(trip)} (${state.entries.count { it.tripId == trip.id }})") }
+                        )
+                    }
+                }
+
+                HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
+                    val trip = sortedTrips.getOrNull(page - 1)
+                    when {
+                        page == 0 -> UnplannedPage(
+                            entries = state.entries.filter { it.tripId == null },
+                            viewModel = viewModel,
+                            onQuantityClick = { quantityEntry = it }
+                        )
+                        trip != null -> TripPage(
+                            trip = trip,
+                            entries = state.entries.filter { it.tripId == trip.id },
+                            viewModel = viewModel,
+                            onComplete = { completingTrip = trip },
+                            onQuantityClick = { quantityEntry = it }
+                        )
+                        else -> Box(modifier = Modifier.fillMaxSize())
+                    }
+                }
+            }
+
+            FloatingActionButton(
+                onClick = { viewModel.openNewTripSheet() },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "New trip")
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnplannedPage(
+    entries: List<GroceryListEntry>,
+    viewModel: GroceryListViewModel,
+    onQuantityClick: (GroceryListEntry) -> Unit
+) {
+    // Grouped by store, same bucketing logic as the web app - a
+    // store-agnostic item (or a placeholder, which has no stores at
+    // all) lands in "Any store".
+    val byStore = linkedMapOf<String, Pair<String, MutableList<GroceryListEntry>>>()
+    for (entry in entries) {
+        if (entry.groceryStores.isEmpty()) {
+            byStore.getOrPut("any") { "Any store" to mutableListOf() }.second.add(entry)
+        } else {
+            for (store in entry.groceryStores) {
+                byStore.getOrPut(store.id.toString()) { store.name to mutableListOf() }.second.add(entry)
+            }
+        }
+    }
+
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        if (byStore.isEmpty()) {
             item {
+                Text(
+                    "Nothing unplanned. Use the card below to add items.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+            }
+        }
+        byStore.forEach { (key, pair) ->
+            val (storeName, storeEntries) = pair
+            item(key = "store-$key") {
                 Text(
                     storeName,
                     style = MaterialTheme.typography.labelMedium,
@@ -223,85 +362,88 @@ private fun GroceryListContent(state: GroceryListUiState, viewModel: GroceryList
                     modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
                 )
             }
-            items(storeEntries, key = { "pool-${it.id}" }) { entry ->
+            items(storeEntries, key = { "pool-$key-${it.id}" }) { entry ->
                 GroceryEntryRow(
                     entry = entry,
                     onClick = { viewModel.openMoveSheet(entry.id) },
                     onDelete = { viewModel.deleteEntry(entry.id) },
                     onResolveClick = { viewModel.openResolveSearch(entry.id) },
-                    onQuantityClick = { quantityEntry = entry }
+                    onQuantityClick = { onQuantityClick(entry) }
                 )
             }
         }
+        item { Spacer(modifier = Modifier.height(88.dp)) } // room for the FAB
+    }
+}
 
+@Composable
+private fun TripPage(
+    trip: GroceryTrip,
+    entries: List<GroceryListEntry>,
+    viewModel: GroceryListViewModel,
+    onComplete: () -> Unit,
+    onQuantityClick: (GroceryListEntry) -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            Text("Trips", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(4.dp))
-        }
-
-        if (state.trips.isEmpty()) {
-            item {
-                Text(
-                    "No trips planned yet - tap + to add one",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
-        }
-        state.trips.sortedBy { it.date }.forEach { trip ->
-            val tripEntries = state.entries.filter { it.tripId == trip.id }
-            item {
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(trip.label ?: trip.date, style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    "${if (trip.label != null) "${trip.date} \u00b7 " else ""}${trip.store?.name ?: "Any store"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tripTitle(trip), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "${if (trip.label != null) "${tripDateLabel(trip.date)} \u00b7 " else ""}" +
+                            "${trip.store?.name ?: "Any store"} \u00b7 ${entries.size} ${if (entries.size == 1) "item" else "items"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                FilledTonalButton(onClick = onComplete) {
+                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Complete")
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Delete trip (items return to Unplanned)") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.deleteTrip(trip.id)
                             }
-                            Row {
-                                IconButton(onClick = { completingTrip = trip }) {
-                                    Icon(Icons.Filled.Check, contentDescription = "Complete trip")
-                                }
-                                IconButton(onClick = { viewModel.deleteTrip(trip.id) }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Delete trip (items return to the list)")
-                                }
-                            }
-                        }
-                        if (tripEntries.isEmpty()) {
-                            Text(
-                                "Nothing planned for this trip yet",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-                        } else {
-                            Column {
-                                tripEntries.forEach { entry ->
-                                    GroceryEntryRow(
-                                        entry = entry,
-                                        onClick = { viewModel.openMoveSheet(entry.id) },
-                                        onDelete = { viewModel.deleteEntry(entry.id) },
-                                        onResolveClick = { viewModel.openResolveSearch(entry.id) },
-                                        onQuantityClick = { quantityEntry = entry }
-                                    )
-                                }
-                            }
-                        }
+                        )
                     }
                 }
             }
+            HorizontalDivider()
         }
-        item { Spacer(modifier = Modifier.height(72.dp)) } // room for the FAB
+        if (entries.isEmpty()) {
+            item {
+                Text(
+                    "Nothing planned for this trip yet. Add items with the card below, or move them here from Unplanned.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+            }
+        }
+        items(entries, key = { "trip-${trip.id}-${it.id}" }) { entry ->
+            GroceryEntryRow(
+                entry = entry,
+                onClick = { viewModel.openMoveSheet(entry.id) },
+                onDelete = { viewModel.deleteEntry(entry.id) },
+                onResolveClick = { viewModel.openResolveSearch(entry.id) },
+                onQuantityClick = { onQuantityClick(entry) }
+            )
+        }
+        item { Spacer(modifier = Modifier.height(88.dp)) } // room for the FAB
     }
 }
 
@@ -383,7 +525,7 @@ private fun QuantityDialog(
  * a plain new item are the fallbacks when nothing fits. Same shape as the
  * web app's add field. */
 @Composable
-private fun AddToListSection(state: GroceryListUiState, viewModel: GroceryListViewModel) {
+private fun AddToListSection(state: GroceryListUiState, viewModel: GroceryListViewModel, onFieldFocused: () -> Unit) {
     val query = state.newPlaceholderInput
     val trimmed = query.trim()
     val results = state.addSearchResults.take(5)
@@ -394,7 +536,7 @@ private fun AddToListSection(state: GroceryListUiState, viewModel: GroceryListVi
             onValueChange = { viewModel.updateNewPlaceholderInput(it) },
             placeholder = { Text("Search your items to add...") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onFieldFocused() }
         )
         if (trimmed.isNotEmpty()) {
             if (state.isSearchingAdd && results.isEmpty()) {

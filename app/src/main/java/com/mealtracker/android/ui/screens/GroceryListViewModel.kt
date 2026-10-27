@@ -45,6 +45,11 @@ data class GroceryListUiState(
     val moveError: String? = null,
 
     // New trip sheet
+    /** Which list the add-item card currently targets: null is the
+     * unplanned pool, otherwise that trip (kept in sync by the UI's pager). */
+    val activeTripId: Int? = null,
+    /** Set after creating a trip so the UI can scroll to its page. */
+    val newlyCreatedTripId: Int? = null,
     val showNewTripSheet: Boolean = false,
     val newTripDate: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
     val newTripLabel: String = "",
@@ -107,6 +112,16 @@ class GroceryListViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(isLoading = false, loadError = e.message ?: "Couldn't load the grocery list")
             }
         }
+    }
+
+    fun selectList(tripId: Int?) {
+        if (_uiState.value.activeTripId != tripId) {
+            _uiState.value = _uiState.value.copy(activeTripId = tripId)
+        }
+    }
+
+    fun consumeNewlyCreatedTrip() {
+        _uiState.value = _uiState.value.copy(newlyCreatedTripId = null)
     }
 
     // --- Move entry between pool/trips ---
@@ -204,7 +219,9 @@ class GroceryListViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAddingEntry = true, actionError = null)
             try {
-                val entry = ApiClient.service.createGroceryEntry(GroceryListEntryCreateRequest(itemId = item.itemId))
+                val entry = ApiClient.service.createGroceryEntry(
+                    GroceryListEntryCreateRequest(itemId = item.itemId, tripId = _uiState.value.activeTripId)
+                )
                 addSearchJob?.cancel()
                 _uiState.value = _uiState.value.copy(
                     entries = _uiState.value.entries + entry,
@@ -214,6 +231,9 @@ class GroceryListViewModel : ViewModel() {
                     isAddingEntry = false,
                     addItemFlow = null
                 )
+            } catch (e: HttpException) {
+                val message = if (e.code() == 409) "This item isn't carried by this trip's store" else e.message() ?: "Couldn't add that"
+                _uiState.value = _uiState.value.copy(isAddingEntry = false, actionError = message)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(isAddingEntry = false, actionError = e.message ?: "Couldn't add that")
             }
@@ -237,7 +257,9 @@ class GroceryListViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAddingPlaceholder = true, actionError = null)
             try {
-                val entry = ApiClient.service.createGroceryEntry(GroceryListEntryCreateRequest(placeholderName = name))
+                val entry = ApiClient.service.createGroceryEntry(
+                    GroceryListEntryCreateRequest(placeholderName = name, tripId = _uiState.value.activeTripId)
+                )
                 addSearchJob?.cancel()
                 _uiState.value = _uiState.value.copy(
                     entries = _uiState.value.entries + entry,
@@ -350,6 +372,7 @@ class GroceryListViewModel : ViewModel() {
                 )
                 _uiState.value = _uiState.value.copy(
                     trips = _uiState.value.trips + trip,
+                    newlyCreatedTripId = trip.id,
                     showNewTripSheet = false,
                     isCreatingTrip = false
                 )

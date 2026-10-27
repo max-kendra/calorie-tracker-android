@@ -1,5 +1,6 @@
 package com.mealtracker.android.ui.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.exclude
@@ -16,9 +17,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -41,6 +39,7 @@ import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import com.mealtracker.android.ui.components.CreateSpeedDial
 import com.mealtracker.android.ui.theme.ThemePreference
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -104,10 +103,10 @@ private val routesWithoutBottomBar = setOf("gate", "onboarding", "meal_detail/{d
 // same as before.
 private val edgeToEdgeStatusBarRoutes = setOf("journal", "meal_detail/{date}/{mealType}")
 
-// Routes that show the global "create new item / recipe" button. Grocery
-// List has its own button (new trip) and creates items from its own
-// search field, so it is left out.
-private val routesWithCreateButton = setOf("home", "journal", "recipes")
+// Routes that show the global "create new item / recipe" speed dial.
+// Grocery List has its own button (new trip) and creates items from its
+// own search field, so it is left out.
+private val routesWithCreateButton = setOf("journal", "recipes")
 
 @Composable
 fun AppNavHost(
@@ -120,31 +119,25 @@ fun AppNavHost(
     var createMenuOpen by remember { mutableStateOf(false) }
     var createFlow by remember { mutableStateOf<GlobalCreateFlow?>(null) }
 
+    LaunchedEffect(currentRoute) { createMenuOpen = false }
+    BackHandler(enabled = createMenuOpen) { createMenuOpen = false }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             floatingActionButton = {
                 if (currentRoute in routesWithCreateButton) {
-                    Box {
-                        FloatingActionButton(onClick = { createMenuOpen = true }) {
-                            Icon(Icons.Filled.Add, contentDescription = "Create new")
+                    CreateSpeedDial(
+                        expanded = createMenuOpen,
+                        onToggle = { createMenuOpen = !createMenuOpen },
+                        onNewItem = {
+                            createMenuOpen = false
+                            createFlow = GlobalCreateFlow.ITEM
+                        },
+                        onNewRecipe = {
+                            createMenuOpen = false
+                            createFlow = GlobalCreateFlow.RECIPE
                         }
-                        DropdownMenu(expanded = createMenuOpen, onDismissRequest = { createMenuOpen = false }) {
-                            DropdownMenuItem(
-                                text = { Text("New item") },
-                                onClick = {
-                                    createMenuOpen = false
-                                    createFlow = GlobalCreateFlow.ITEM
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("New recipe") },
-                                onClick = {
-                                    createMenuOpen = false
-                                    createFlow = GlobalCreateFlow.RECIPE
-                                }
-                            )
-                        }
-                    }
+                    )
                 }
             },
             // Everywhere EXCEPT edgeToEdgeStatusBarRoutes still gets a
